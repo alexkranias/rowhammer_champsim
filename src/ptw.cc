@@ -50,35 +50,43 @@ void PageTableWalker::handle_read()
       std::cout << " event: " << handle_pkt.event_cycle << " current: " << current_cycle << std::endl;
     });
 
-    auto ptw_addr = splice_bits(CR3_addr, vmem.get_offset(handle_pkt.address, vmem.pt_levels - 1) * PTE_BYTES, LOG2_PAGE_SIZE);
-    auto ptw_level = vmem.pt_levels - 1;
-    for (auto pscl : {&PSCL5, &PSCL4, &PSCL3, &PSCL2}) {
-      if (auto check_addr = pscl->check_hit(handle_pkt.address); check_addr.has_value()) {
-        ptw_addr = check_addr.value();
-        ptw_level = pscl->level - 1;
-      }
-    }
+    // PTW_BYPASS
+    // auto ptw_addr = splice_bits(CR3_addr, vmem.get_offset(handle_pkt.address, vmem.pt_levels - 1) * PTE_BYTES, LOG2_PAGE_SIZE);
+    // auto ptw_level = vmem.pt_levels - 1;
+    // for (auto pscl : {&PSCL5, &PSCL4, &PSCL3, &PSCL2}) {
+    //   if (auto check_addr = pscl->check_hit(handle_pkt.address); check_addr.has_value()) {
+    //     ptw_addr = check_addr.value();
+    //     ptw_level = pscl->level - 1;
+    //   }
+    // }
 
     PACKET packet = handle_pkt;
-    packet.fill_level = lower_level->fill_level; // This packet will be sent from L1 to PTW.
-    packet.address = ptw_addr;
+    // PTW_BYPASS
+    // packet.fill_level = lower_level->fill_level; // This packet will be sent from L1 to PTW.
+    // packet.address = ptw_addr;
     packet.v_address = handle_pkt.address;
     packet.cpu = cpu;
-    packet.type = TRANSLATION;
-    packet.init_translation_level = ptw_level;
-    packet.translation_level = packet.init_translation_level;
-    packet.to_return = {this};
+    // PTW_BYPASS
+    // packet.type = TRANSLATION;
+    // packet.init_translation_level = ptw_level;
+    // packet.translation_level = packet.init_translation_level;
+    packet.translation_level = 0;
+    // PTW_BYPASS
+    // packet.to_return = {this};
 
-    int rq_index = lower_level->add_rq(&packet);
-    if (rq_index == -2)
-      return;
+    // int rq_index = lower_level->add_rq(&packet);
+    // if (rq_index == -2)
+    //   return;
 
     packet.to_return = handle_pkt.to_return; // Set the return for MSHR packet same as read packet.
     packet.type = handle_pkt.type;
 
     auto it = MSHR.insert(std::end(MSHR), packet);
     it->cycle_enqueued = current_cycle;
-    it->event_cycle = std::numeric_limits<uint64_t>::max();
+    // PTW_BYPASS
+    // it->event_cycle = std::numeric_limits<uint64_t>::max();
+    it->event_cycle = current_cycle; /* PTW_BYPASS add */
+    MSHR.sort(ord_event_cycle<PACKET>());
 
     RQ.pop_front();
     reads_this_cycle--;
@@ -96,10 +104,10 @@ void PageTableWalker::handle_fill()
       // Return the translated physical address to STLB. Does not contain last
       // 12 bits
       auto [addr, fault] = vmem.va_to_pa(cpu, fill_mshr->v_address);
-      if (warmup_complete[cpu] && fault) {
-        fill_mshr->event_cycle = current_cycle + vmem.minor_fault_penalty;
-        MSHR.sort(ord_event_cycle<PACKET>{});
-      } else {
+      // if (warmup_complete[cpu] && fault) {
+      //   fill_mshr->event_cycle = current_cycle + vmem.minor_fault_penalty;
+      //   MSHR.sort(ord_event_cycle<PACKET>{});
+      // } else {
         fill_mshr->data = addr;
         fill_mshr->address = fill_mshr->v_address;
 
@@ -120,8 +128,11 @@ void PageTableWalker::handle_fill()
           total_miss_latency += current_cycle - fill_mshr->cycle_enqueued;
 
         MSHR.erase(fill_mshr);
-      }
-    } else {
+      // PTW_BYPASS 
+      // }
+    } 
+    else {
+      assert(0); /* PTW_BYPASS add */
       auto [addr, fault] = vmem.get_pte_pa(cpu, fill_mshr->v_address, fill_mshr->translation_level);
       if (warmup_complete[cpu] && fault) {
         fill_mshr->event_cycle = current_cycle + vmem.minor_fault_penalty;
@@ -196,6 +207,7 @@ int PageTableWalker::add_rq(PACKET* packet)
 
 void PageTableWalker::return_data(PACKET* packet)
 {
+  assert(0); /* PTW_BYPASS add */
   for (auto& mshr_entry : MSHR) {
     if (eq_addr<PACKET>{packet->address, LOG2_BLOCK_SIZE}(mshr_entry)) {
       mshr_entry.event_cycle = current_cycle;

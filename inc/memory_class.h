@@ -18,7 +18,7 @@
 #define MEMORY_CLASS_H
 
 #include <limits>
-
+#include "rowhammer_detector.h"
 #include "block.h"
 
 // CACHE ACCESS TYPE
@@ -27,7 +27,11 @@
 #define PREFETCH 2
 #define WRITEBACK 3
 #define TRANSLATION 4
-#define NUM_TYPES 5
+#define RH_MITIGATION 5
+#define RH_UPDATE 6
+#define RH_READ 7
+#define RH_WRITE 8
+#define NUM_TYPES 9
 
 // CACHE BLOCK
 class BLOCK
@@ -55,6 +59,11 @@ public:
    */
 
   const unsigned fill_level;
+  std::vector<ACTInfo> ACTs;
+  std::vector<std::pair<uint64_t, uint8_t>> rhActions;
+  RH_Detector *detector;
+  uint64_t numPPages;
+  bool *procPageAccess;;
   virtual int add_rq(PACKET* packet) = 0;
   virtual int add_wq(PACKET* packet) = 0;
   virtual int add_pq(PACKET* packet) = 0;

@@ -14,7 +14,8 @@ uint32_t CACHE::find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const
 {
   // look for the maxRRPV line
   auto begin = std::next(std::begin(block), set * NUM_WAY);
-  auto end = std::next(begin, NUM_WAY);
+  uint64_t max_way = get_max_way(set);
+  auto end = std::next(begin, max_way);
   auto victim = std::find_if(begin, end, [](BLOCK x) { return x.lru == maxRRPV; }); // hijack the lru field
   while (victim == end) {
     for (auto it = begin; it != end; ++it)

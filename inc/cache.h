@@ -21,7 +21,8 @@
 #include <list>
 #include <string>
 #include <vector>
-
+#include <unordered_set>
+#include <cstring>
 #include "champsim.h"
 #include "delay_queue.hpp"
 #include "memory_class.h"
@@ -48,6 +49,35 @@ public:
   const bool virtual_prefetch;
   bool ever_seen_data = false;
   const unsigned pref_activate_mask = (1 << static_cast<int>(LOAD)) | (1 << static_cast<int>(PREFETCH));
+
+  uint64_t *CRA_ctr = NULL;
+  uint64_t *CRA_ctr_set = NULL;
+  uint64_t *per_set_tracker_state = NULL;
+  bool     *isUniqRow = NULL;
+  std::unordered_set<uint64_t> *cachedCtrs;
+
+  uint64_t last_tracker_reset = 0;
+  uint64_t rows_per_set = 0;
+  uint64_t sets_in_state[4] = {0}; // state-0, state-1, state-2, state-3
+  uint64_t uniq_rows_ACT = 0;
+  uint64_t num_ACT = 0;
+  uint64_t num_mits = 0;
+  uint64_t row_ACT[100] = {};
+
+  uint64_t s_resets = 0;
+  uint64_t s_sets_in_state[4] = {0}; // state-0, state-1, state-2, state-3
+  uint64_t s_uniq_rows_ACT = 0;
+  uint64_t s_uniq_rows_touched = 0;
+  uint64_t s_num_ACT = 0;
+  uint64_t s_num_mits = 0;
+  uint64_t s_mm_set_evicts = 0;
+  uint64_t s_mm_set_misses = 0;
+  uint64_t s_row_ACT[100] = {};
+  uint64_t s_early_writebacks = 0;
+  uint64_t s_ctr_way_data_wb = 0;
+  uint64_t s_BH_num_delay = 0;
+  uint64_t s_BH_sum_delay = 0;
+  uint64_t s_BH_max_delay = 0;
 
   // prefetch stats
   uint64_t pf_requested = 0, pf_issued = 0, pf_useful = 0, pf_useless = 0, pf_fill = 0;
@@ -83,6 +113,9 @@ public:
 
   uint32_t get_set(uint64_t address);
   uint32_t get_way(uint64_t address, uint32_t set);
+  uint32_t get_max_way(uint64_t set);
+  uint32_t num_reserved_ways_in_state_3();
+  void     free_up_ctr_ways(uint64_t set);
 
   int invalidate_entry(uint64_t inval_addr);
   int prefetch_line(uint64_t pf_addr, bool fill_this_level, uint32_t prefetch_metadata);
@@ -104,6 +137,9 @@ public:
 
   void print_deadlock() override;
 
+  void recvACTInfo();
+  void performRHActions();
+
 #include "cache_modules.inc"
 
   const repl_t repl_type;
@@ -118,6 +154,36 @@ public:
         MAX_WRITE(max_write), prefetch_as_load(pref_load), match_offset_bits(wq_full_addr), virtual_prefetch(va_pref), pref_activate_mask(pref_act_mask),
         repl_type(repl), pref_type(pref)
   {
+    if (NAME == "LLC") {
+      CRA_ctr = new uint64_t[DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS];
+      CRA_ctr_set = new uint64_t[NUM_SET];
+      per_set_tracker_state = new uint64_t[NUM_SET];
+      isUniqRow = new bool[DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS];
+      memset((void *)CRA_ctr, 0, sizeof(uint64_t) * DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS);
+      memset((void *)isUniqRow, 0, sizeof(bool) * DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS);
+      memset((void *)CRA_ctr_set, 0, sizeof(uint64_t) * NUM_SET);
+      memset((void *)per_set_tracker_state, 0, sizeof(uint64_t) * NUM_SET);
+      cachedCtrs = new std::unordered_set<uint64_t>[NUM_SET];
+      rows_per_set = (DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS)/NUM_SET;
+      if (VWQ_ENABLE) {
+        std::cout << "VWQ_ENABLED" << std::endl;
+      }
+      if (ART_ENABLE) {
+        std::cout << "[RH_DEFENSE] ART 0-1-2-8 way policy tracker enabled: state: "
+                  << (ART_1B ? "1bit" : "2bit") << " MM: " 
+                  << (ART_MM ? "MM_YES" : "MM_NO") << " LITE: " 
+                  << (ART_LITE ? "LITE_YES" : "LITE_NO") << std::endl;
+      }
+      if (HYDRA_ENABLE) {
+        std::cout << "[RH_DEFENSE] HYDRA tracker enabled: ROW_GROUP_SIZE "
+                  << HYDRA_ROW_GROUP_SIZE << " RCC_SETS " << HYDRA_RCC_SETS << std::endl;
+      }
+      if (IDEAL_TRACKER) {
+        std::cout << "[RH_DEFENSE] IDEAL tracker enabled" << std::endl;
+      }
+      std::cout << "RH_THRESHOLD " << RH_THRESHOLD << std::endl;
+      last_tracker_reset = 0;
+    }
   }
 };
 

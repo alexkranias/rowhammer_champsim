@@ -27,18 +27,34 @@
 class MemoryRequestProducer;
 class LSQ_ENTRY;
 
+struct ACTInfo
+{
+  uint64_t ch = 0;
+  uint64_t ra = 0;
+  uint64_t ba = 0;
+  uint64_t ro = 0;
+  ACTInfo(uint64_t _ch, uint64_t _ra, uint64_t _ba, uint64_t _ro)
+          : ch(_ch), ra(_ra), ba(_ba), ro(_ro) {}
+};
+
 // message packet
 class PACKET
 {
 public:
   bool scheduled = false;
 
-  uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()}, type = 0, fill_level = 0, pf_origin_level = 0;
+  bool is_ACT = false;
+
+  uint64_t CRA_idx = uint64_t(-1);
+
+  uint8_t asid[2] = {std::numeric_limits<uint8_t>::max(), std::numeric_limits<uint8_t>::max()}, 
+          type = 0, fill_level = 0, pf_origin_level = 0;
 
   uint32_t pf_metadata;
   uint32_t cpu = NUM_CPUS;
 
-  uint64_t address = 0, v_address = 0, data = 0, instr_id = 0, ip = 0, event_cycle = std::numeric_limits<uint64_t>::max(), cycle_enqueued = 0;
+  uint64_t address = 0, v_address = 0, data = 0, instr_id = 0, 
+            ip = 0, event_cycle = std::numeric_limits<uint64_t>::max(), cycle_enqueued = 0;
 
   std::vector<std::vector<LSQ_ENTRY>::iterator> lq_index_depend_on_me = {}, sq_index_depend_on_me = {};
   std::vector<champsim::circular_buffer<ooo_model_instr>::iterator> instr_depend_on_me;

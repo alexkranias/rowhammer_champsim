@@ -18,7 +18,6 @@
 
 #include <algorithm>
 #include <iterator>
-
 #include "champsim.h"
 #include "champsim_constants.h"
 #include "util.h"
@@ -28,8 +27,11 @@
 #define NDEBUG
 #endif
 
+#define MEM_BYTES (DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS * DRAM_COLUMNS * BLOCK_SIZE)
+
 extern VirtualMemory vmem;
 extern uint8_t warmup_complete[NUM_CPUS];
+extern uint8_t all_warmup_complete;
 
 void CACHE::handle_fill()
 {
@@ -42,10 +44,11 @@ void CACHE::handle_fill()
     uint32_t set = get_set(fill_mshr->address);
 
     auto set_begin = std::next(std::begin(block), set * NUM_WAY);
-    auto set_end = std::next(set_begin, NUM_WAY);
+    uint64_t max_way = get_max_way(set);
+    auto set_end = std::next(set_begin, max_way); // set ends before first reserved way
     auto first_inv = std::find_if_not(set_begin, set_end, is_valid<BLOCK>());
     uint32_t way = std::distance(set_begin, first_inv);
-    if (way == NUM_WAY)
+    if (way == max_way) // invalid way not found
       way = impl_replacement_find_victim(fill_mshr->cpu, fill_mshr->instr_id, set, &block.data()[set * NUM_WAY], fill_mshr->ip, fill_mshr->address,
                                          fill_mshr->type);
 
@@ -53,7 +56,7 @@ void CACHE::handle_fill()
     if (!success)
       return;
 
-    if (way != NUM_WAY) {
+    if (way != max_way) { // Found a non-reserved way
       // update processed packets
       fill_mshr->data = block[set * NUM_WAY + way].data;
 
@@ -81,7 +84,9 @@ void CACHE::handle_writeback()
 
     BLOCK& fill_block = block[set * NUM_WAY + way];
 
-    if (way < NUM_WAY) // HIT
+    uint64_t max_way = get_max_way(set);
+
+    if (way < max_way) // HIT
     {
       impl_replacement_update_state(handle_pkt.cpu, set, way, fill_block.address, handle_pkt.ip, 0, handle_pkt.type, 1);
 
@@ -99,10 +104,10 @@ void CACHE::handle_writeback()
       } else {
         // find victim
         auto set_begin = std::next(std::begin(block), set * NUM_WAY);
-        auto set_end = std::next(set_begin, NUM_WAY);
+        auto set_end = std::next(set_begin, max_way);
         auto first_inv = std::find_if_not(set_begin, set_end, is_valid<BLOCK>());
         way = std::distance(set_begin, first_inv);
-        if (way == NUM_WAY)
+        if (way == max_way)
           way = impl_replacement_find_victim(handle_pkt.cpu, handle_pkt.instr_id, set, &block.data()[set * NUM_WAY], handle_pkt.ip, handle_pkt.address,
                                              handle_pkt.type);
 
@@ -136,7 +141,9 @@ void CACHE::handle_read()
     uint32_t set = get_set(handle_pkt.address);
     uint32_t way = get_way(handle_pkt.address, set);
 
-    if (way < NUM_WAY) // HIT
+    uint64_t max_way = get_max_way(set);
+
+    if (way < max_way) // HIT
     {
       readlike_hit(set, way, handle_pkt);
     } else {
@@ -163,7 +170,9 @@ void CACHE::handle_prefetch()
     uint32_t set = get_set(handle_pkt.address);
     uint32_t way = get_way(handle_pkt.address, set);
 
-    if (way < NUM_WAY) // HIT
+    uint64_t max_way = get_max_way(set);
+
+    if (way < max_way) // HIT
     {
       readlike_hit(set, way, handle_pkt);
     } else {
@@ -304,7 +313,9 @@ bool CACHE::filllike_miss(std::size_t set, std::size_t way, PACKET& handle_pkt)
     std::cout << " cycle: " << current_cycle << std::endl;
   });
 
-  bool bypass = (way == NUM_WAY);
+  uint64_t max_way = get_max_way(set);
+
+  bool bypass = (way == max_way);
 #ifndef LLC_BYPASS
   assert(!bypass);
 #endif
@@ -329,6 +340,41 @@ bool CACHE::filllike_miss(std::size_t set, std::size_t way, PACKET& handle_pkt)
       auto result = lower_level->add_wq(&writeback_packet);
       if (result == -2)
         return false;
+
+      if (VWQ_ENABLE && NAME == "LLC") {
+        // Write up-to 32 dirty lines in nearby 16 sets from same page 
+        int max_nearby_writebacks = 32;
+        int max_sets_per_side = 16;
+        uint32_t wq_set_begin = (set > max_sets_per_side) ? set - max_sets_per_side : 0,
+                 wq_set_end = (set < NUM_SET - max_sets_per_side) ? set + max_sets_per_side : NUM_SET;
+        uint64_t max_way = get_max_way(set);
+        for (uint32_t i = wq_set_begin; (i < wq_set_end) && max_nearby_writebacks; i++) {
+          for (uint32_t j = i*NUM_WAY; (j < i*NUM_WAY + max_way) && max_nearby_writebacks; j++) {
+            if (!(i == set && j == way) && block[j].valid && block[j].dirty
+                && (block[j].address >> LOG2_PAGE_SIZE) == (fill_block.address >> LOG2_PAGE_SIZE)) {
+              PACKET nearby_writeback_packet;
+
+              nearby_writeback_packet.fill_level = lower_level->fill_level;
+              nearby_writeback_packet.cpu = block[j].cpu;
+              nearby_writeback_packet.address = block[j].address;
+              nearby_writeback_packet.data = block[j].data;
+              nearby_writeback_packet.instr_id = block[j].instr_id;
+              nearby_writeback_packet.ip = 0;
+              nearby_writeback_packet.type = WRITEBACK;
+              nearby_writeback_packet.to_return = {this};
+
+              if (lower_level->add_wq(&nearby_writeback_packet) != -2) {
+                max_nearby_writebacks--;
+                s_early_writebacks++;
+                block[j].dirty = false;
+              }
+              else {
+                max_nearby_writebacks = 0; // WQ is full, no need to search for more lines
+              }
+            }
+          }
+        }
+      }
     }
 
     if (ever_seen_data)
@@ -398,6 +444,36 @@ void CACHE::operate_reads()
   va_translate_prefetches();
   handle_prefetch();
 
+  if (NAME == "LLC") {
+    if (current_cycle - last_tracker_reset >= 256000000ul) {
+      s_resets++;
+      memset((void *)CRA_ctr, 0, sizeof(uint64_t) * DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS);
+      memset((void *)CRA_ctr_set, 0, sizeof(uint64_t) * NUM_SET);
+      memset((void *)per_set_tracker_state, 0, sizeof(uint64_t) * NUM_SET);
+      memset((void *)row_ACT, 0, sizeof(uint64_t) * 100);
+      memset((void *)sets_in_state, 0, sizeof(uint64_t) * 4);
+      if (ART_LITE) {
+        // LITE_CONFIG: Reset cached ctrs in LLC set
+        for (int i = 0; i < NUM_SET; i++)
+          cachedCtrs[i].clear();
+      }
+      last_tracker_reset = current_cycle;
+      uniq_rows_ACT = 0;
+      num_ACT = 0;
+      num_mits = 0;
+      if (HYDRA_ENABLE)
+        lower_level->detector->reset();
+    }
+    if (BLOCKHAMMER && all_warmup_complete > NUM_CPUS && current_cycle % 10000000 == 0) {
+      std::cout << "[Cycle-" << current_cycle << "] LLC_BH_STATS:- NUM_DELAY: " 
+                << s_BH_num_delay 
+                << " SUM_DELAY: " << s_BH_sum_delay
+                << " MAX_DELAY: " << s_BH_max_delay << std::endl;
+    }
+    performRHActions();
+    recvACTInfo();
+  }
+
   RQ.operate();
   PQ.operate();
   VAPQ.operate();
@@ -408,7 +484,9 @@ uint32_t CACHE::get_set(uint64_t address) { return ((address >> OFFSET_BITS) & b
 uint32_t CACHE::get_way(uint64_t address, uint32_t set)
 {
   auto begin = std::next(block.begin(), set * NUM_WAY);
-  auto end = std::next(begin, NUM_WAY);
+  uint64_t max_way = get_max_way(set);
+
+  auto end = std::next(begin, max_way);
   return std::distance(begin, std::find_if(begin, end, eq_addr<BLOCK>(address, OFFSET_BITS)));
 }
 
@@ -416,8 +494,8 @@ int CACHE::invalidate_entry(uint64_t inval_addr)
 {
   uint32_t set = get_set(inval_addr);
   uint32_t way = get_way(inval_addr, set);
-
-  if (way < NUM_WAY)
+  uint64_t max_way = get_max_way(set);
+  if (way < max_way)
     block[set * NUM_WAY + way].valid = 0;
 
   return way;
@@ -652,8 +730,329 @@ int CACHE::add_pq(PACKET* packet)
   return PQ.occupancy();
 }
 
+uint32_t CACHE::num_reserved_ways_in_state_3() {
+  // Only need to reserve 4 untagged ways if TRH <= 32
+  uint32_t max_reserve_ways = (RH_THRESHOLD/2 <= 16) ? 4 : 8;
+  if (NUM_SET == 32768 && NUM_WAY == 12) {
+    // 24 MB LLC, only need to reserve 1/3rd capacity
+    max_reserve_ways = 4;
+  }
+  if (ART_LITE) {
+    // LITE_CONFIG: 1 way allocated in state-3 (direct transition from s-0 -> s-3)
+    assert(ART_MM);
+    max_reserve_ways = 1;
+  }
+  return max_reserve_ways;
+}
+
+uint32_t CACHE::get_max_way(uint64_t set) {
+  if (NAME != "LLC" || !ART_ENABLE) {
+    return NUM_WAY;
+  }
+  else if (ART_1B) { // 1bit tracker
+    return NUM_WAY - (per_set_tracker_state[set] ? 8 : 1);
+  }
+  else { // 2bit tracker
+    // 0-1-2-8 ways reserved (4 is TRH <= 32)
+    switch(per_set_tracker_state[set]) {
+      case 0:
+        return NUM_WAY;
+      case 1:
+        return (NUM_WAY - 1);
+      case 2:
+        return (NUM_WAY - 2);
+      case 3: 
+        return (NUM_WAY - num_reserved_ways_in_state_3());
+      default:
+        std::cout << "[WARNING] Unrecognized tracker state\n";
+        return NUM_WAY;
+    }
+  }
+
+}
+
+void CACHE::free_up_ctr_ways(uint64_t set) {
+  if (NAME != "LLC" || !ART_ENABLE) {
+    return;
+  }
+  uint32_t max_way = get_max_way(set);
+  for (uint32_t w = max_way; w < NUM_WAY; w++) {
+    if (block[set * NUM_WAY + w].valid && block[set * NUM_WAY + w].dirty) {
+      // writeback dirty way
+      s_ctr_way_data_wb++;
+      lower_level->rhActions.push_back(std::make_pair(block[set * NUM_WAY + w].address, RH_WRITE));
+    }
+    // invalidate way
+    block[set * NUM_WAY + w].valid = false;
+    block[set * NUM_WAY + w].dirty = false;
+    block[set * NUM_WAY + w].address = 0;
+  }
+}
+
+void CACHE::performRHActions() {
+  if (all_warmup_complete <= NUM_CPUS)
+    return;
+
+  int max_actions = 2;
+
+  for (auto it = lower_level->rhActions.begin(); it != lower_level->rhActions.end();) {
+    assert(ART_ENABLE || HYDRA_ENABLE || IDEAL_TRACKER);
+    PACKET handle_pkt;
+
+    handle_pkt.cpu = 0;
+    handle_pkt.address = it->first;
+    handle_pkt.data = 0;
+    handle_pkt.instr_id = 0;
+    handle_pkt.ip = 0;
+    handle_pkt.type = it->second;
+    if (it->second == RH_WRITE) {
+      handle_pkt.fill_level = lower_level->fill_level;
+      handle_pkt.to_return.clear();
+      if (lower_level->add_wq(&handle_pkt) == -2)
+        return;
+    }
+    else {
+      handle_pkt.fill_level = fill_level;
+      handle_pkt.to_return = {this};
+      if (lower_level->get_occupancy(1, it->first) == lower_level->get_size(1, it->second))
+        return;
+      else
+        lower_level->add_rq(&handle_pkt);
+    }
+
+    it = lower_level->rhActions.erase(it);
+    max_actions--;
+    if (max_actions == 0) {
+      break;
+    }
+  } 
+}
+
+void CACHE::recvACTInfo() {
+  if (all_warmup_complete <= NUM_CPUS)
+    return;
+  
+  for (auto it = lower_level->ACTs.begin(); it != lower_level->ACTs.end();) {
+    uint64_t ch = it->ch, ra = it->ra, ba = it->ba, ro = it->ro;
+    uint64_t CRA_idx = ro * (DRAM_CHANNELS * DRAM_BANKS * DRAM_RANKS)
+                        + ra * (DRAM_CHANNELS * DRAM_BANKS)
+                        + ba * (DRAM_CHANNELS)
+                        + ch;
+    if ((CRA_idx * DRAM_COLUMNS * BLOCK_SIZE) >= (MEM_BYTES - RESERVE_RH_CAPACITY)) {
+      // Ignore accesses to RCT
+      it = lower_level->ACTs.erase(it);
+      continue;
+    }
+    if (ART_ENABLE && (writes_available_this_cycle == 0 || reads_available_this_cycle == 0)) {
+      // Don't have cache bandwidth, try next cycle...
+      break;
+    }
+    if (ART_ENABLE) { // ART tracker
+      writes_available_this_cycle--;
+      reads_available_this_cycle--;
+      s_num_ACT++;
+      num_ACT++;
+      if (isUniqRow[CRA_idx] == false) {
+        s_uniq_rows_touched++;
+      }
+      isUniqRow[CRA_idx] = true;
+      uint64_t set_idx = CRA_idx/rows_per_set;
+      if (CRA_ctr[CRA_idx] == 0) { // New ctr required
+        s_uniq_rows_ACT++;
+        uniq_rows_ACT++;
+        if (ART_1B) { // 1bit tracker
+          if (CRA_ctr_set[set_idx] == ART_CTR_PER_WAY) { // transition from 1 to 8 ways
+            assert(per_set_tracker_state[set_idx] == 0);
+            per_set_tracker_state[set_idx] = 1;
+            s_sets_in_state[1]++;
+            sets_in_state[1]++;
+            free_up_ctr_ways(set_idx); // WB dirty ways if any
+          }
+        }
+        else { // 2bit tracker
+          // If all ctr slots are occupied, perform way transition
+          // Unless we are already in state-3, in which case no action required
+          if ((CRA_ctr_set[set_idx] == 
+              (NUM_WAY - get_max_way(set_idx)) * ART_CTR_PER_WAY) &&
+              per_set_tracker_state[set_idx] < 3) {
+                uint32_t curr_state = per_set_tracker_state[set_idx];
+                // LITE_CONFIG: advance directly to state 3 (1 way allocated)
+                uint32_t adv_next_state = (ART_LITE) ? 3 : 1;
+                per_set_tracker_state[set_idx] += adv_next_state;
+                s_sets_in_state[curr_state + adv_next_state]++;
+                sets_in_state[curr_state + adv_next_state]++;
+                free_up_ctr_ways(set_idx);
+          }
+        }
+        // More ctrs in set than state-3 ways can hold: consult MTT
+        if (ART_MM && CRA_ctr_set[set_idx] >= 
+            num_reserved_ways_in_state_3() * ART_CTR_PER_WAY) {
+          // Writeback (rd-mod-wr) dirty counter
+          uint64_t op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + 2*CRA_idx;
+          lower_level->rhActions.push_back(std::make_pair(op_addr, RH_UPDATE));
+          // Fetch missing counter
+          op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + 2*CRA_idx + 64;
+          lower_level->rhActions.push_back(std::make_pair(op_addr, RH_READ));
+          if (ART_LITE) {
+            // LITE_CONFIG: Erase pseudo-random element from set of cached counters
+            cachedCtrs[set_idx].erase(cachedCtrs[set_idx].begin());
+          }
+          s_mm_set_evicts++;
+        }
+        CRA_ctr_set[set_idx]++; // Update rows-per-set
+        if (ART_LITE) {
+          cachedCtrs[set_idx].insert(CRA_idx); // Insert new ctr in LLC set
+          assert(cachedCtrs[set_idx].size() <= num_reserved_ways_in_state_3() * ART_CTR_PER_WAY);
+        }
+      }
+      else if (ART_MM && CRA_ctr_set[set_idx] > 
+                num_reserved_ways_in_state_3() * ART_CTR_PER_WAY) { // Consult MTT
+        if (ART_LITE) { // LITE_CONFIG
+          if (cachedCtrs[set_idx].find(CRA_idx) == cachedCtrs[set_idx].end()) {
+            // Cache miss - writeback dirty counter
+            uint64_t op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + 2*CRA_idx;
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_UPDATE));
+            // Fetch missing counter
+            op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + 2*CRA_idx + 64;
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_READ));
+            s_mm_set_misses++;
+            // LITE_CONFIG: Update LLC set cached counters (random evict, insert ctr)
+            cachedCtrs[set_idx].erase(cachedCtrs[set_idx].begin());
+            cachedCtrs[set_idx].insert(CRA_idx);
+            assert(cachedCtrs[set_idx].size() == num_reserved_ways_in_state_3() * ART_CTR_PER_WAY);
+          }
+        }
+        else {
+          // Simulate ctr-cache misses and replacement (random eviction) probabilistically
+          uint32_t randVal = std::rand() % CRA_ctr_set[set_idx]; 
+          uint32_t numUncachedCtrs = CRA_ctr_set[set_idx] 
+                                      - num_reserved_ways_in_state_3() * ART_CTR_PER_WAY;
+          if (randVal < numUncachedCtrs) {
+            // Cache miss - writeback dirty counter
+            uint64_t op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + 2*CRA_idx;
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_UPDATE));
+            // Fetch missing counter
+            op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + 2*CRA_idx + 64;
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_READ));
+            s_mm_set_misses++;
+          }
+        }
+      }
+      CRA_ctr[CRA_idx]++;
+      if (CRA_ctr[CRA_idx] % (RH_THRESHOLD/2) == 0) { // Issue mitigation
+        s_num_mits++;
+        num_mits++;
+        uint64_t op_addr;
+        for (int i = 0; i < RH_BLAST_RADIUS; i++) {
+          if (ro > i) {
+            op_addr = BLOCK_SIZE * DRAM_COLUMNS * 
+                      (ch + DRAM_CHANNELS * (ba + DRAM_BANKS * (ra + DRAM_RANKS * (ro - (i + 1)))));
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_MITIGATION));
+          }
+          if (ro < DRAM_ROWS - (i + 1)) {
+            op_addr = BLOCK_SIZE * DRAM_COLUMNS * 
+                      (ch + DRAM_CHANNELS * (ba + DRAM_BANKS * (ra + DRAM_RANKS * (ro + i + 1))));
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_MITIGATION));
+          }
+        }
+      }
+      if ((CRA_ctr[CRA_idx]-1)%10 == 0) { // Histogram
+        row_ACT[CRA_ctr[CRA_idx]/10 > 99 ? 99 : CRA_ctr[CRA_idx]/10]++;
+        s_row_ACT[CRA_ctr[CRA_idx]/10 > 99 ? 99 : CRA_ctr[CRA_idx]/10]++;
+      }
+    }
+    else if (HYDRA_ENABLE) {
+      uint64_t hydra_idx = CRA_idx;
+      bool mitigate = lower_level->detector->access(hydra_idx, 0, 0, 0);
+      uint64_t UpdateGrpIdx = lower_level->detector->RowGroupInitPenalty;
+      uint64_t CacheCtrIdx = lower_level->detector->CtrRdPenalty;
+      uint64_t DirtyCtrIdx = lower_level->detector->CtrMdPenalty;
+      uint64_t op_addr = -1;
+      if (mitigate) { // Issue mitigation
+        //DEBUG std::cout << "[HYDRA] Mitigation reqd for idx " << hydra_idx << std::endl;
+        for (int i = 0; i < RH_BLAST_RADIUS; i++) {
+          if (ro > i) {
+            op_addr = BLOCK_SIZE * DRAM_COLUMNS * 
+                      (ch + DRAM_CHANNELS * (ba + DRAM_BANKS * (ra + DRAM_RANKS * (ro - (i + 1)))));
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_MITIGATION));
+          }
+          if (ro < DRAM_ROWS - (i + 1)) {
+            op_addr = BLOCK_SIZE * DRAM_COLUMNS * 
+                      (ch + DRAM_CHANNELS * (ba + DRAM_BANKS * (ra + DRAM_RANKS * (ro + i + 1))));
+            lower_level->rhActions.push_back(std::make_pair(op_addr, RH_MITIGATION));
+          }
+        }
+      }
+      if (HYDRA_DO_MITS) {
+        if (UpdateGrpIdx) { // row-group init in RCT
+          // Row-group init -> rd-mod-wr operation (assume 1B counter)
+          op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + UpdateGrpIdx;
+          lower_level->rhActions.push_back(std::make_pair(op_addr, RH_UPDATE));
+        }
+        if (CacheCtrIdx) { // row-ctr miss, fetch from RCT
+          op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + CacheCtrIdx;
+          lower_level->rhActions.push_back(std::make_pair(op_addr, RH_READ));
+        }
+        if (DirtyCtrIdx) { // writeback dirty row-ctr in RCT
+          op_addr = (MEM_BYTES - RESERVE_RH_CAPACITY) + DirtyCtrIdx;
+          lower_level->rhActions.push_back(std::make_pair(op_addr, RH_UPDATE));
+        }
+      }
+    }
+    else { // Record basic stats and implement IT mitigations if required
+      s_num_ACT++;
+      num_ACT++;
+      if (isUniqRow[CRA_idx] == false) {
+        s_uniq_rows_touched++;
+      }
+      isUniqRow[CRA_idx] = true;
+      if (CRA_ctr[CRA_idx] == 0) { 
+        s_uniq_rows_ACT++;
+        uniq_rows_ACT++;
+      }
+      CRA_ctr[CRA_idx]++;
+      if (CRA_ctr[CRA_idx] % (RH_THRESHOLD/2) == 0) {
+        s_num_mits++;
+        num_mits++;
+        if (IDEAL_TRACKER) { // IT launches mitigations
+          uint64_t op_addr = -1;
+          for (int i = 0; i < RH_BLAST_RADIUS; i++) {
+            if (ro > i) {
+              op_addr = BLOCK_SIZE * DRAM_COLUMNS * 
+                        (ch + DRAM_CHANNELS * (ba + DRAM_BANKS * (ra + DRAM_RANKS * (ro - (i + 1)))));
+              lower_level->rhActions.push_back(std::make_pair(op_addr, RH_MITIGATION));
+            }
+            if (ro < DRAM_ROWS - (i + 1)) {
+              op_addr = BLOCK_SIZE * DRAM_COLUMNS * 
+                        (ch + DRAM_CHANNELS * (ba + DRAM_BANKS * (ra + DRAM_RANKS * (ro + i + 1))));
+              lower_level->rhActions.push_back(std::make_pair(op_addr, RH_MITIGATION));
+            }
+          }
+        }
+      }
+      if ((CRA_ctr[CRA_idx]-1)%10 == 0) {
+        row_ACT[CRA_ctr[CRA_idx]/10 > 99 ? 99 : CRA_ctr[CRA_idx]/10]++;
+        s_row_ACT[CRA_ctr[CRA_idx]/10 > 99 ? 99 : CRA_ctr[CRA_idx]/10]++;
+      }
+    }
+    it = lower_level->ACTs.erase(it);
+  }
+}
+
 void CACHE::return_data(PACKET* packet)
 {
+  if (NAME == "LLC") {
+    if (packet->type == RH_MITIGATION)
+      return;
+    else if (packet->type == RH_UPDATE) {
+      lower_level->rhActions.push_back(std::make_pair(packet->address, RH_WRITE));
+      return;
+    }
+    else if (packet->type == RH_READ) 
+      return;
+    else if (packet->type == RH_WRITE)
+      assert(0);
+  }
   // check MSHR information
   auto mshr_entry = std::find_if(MSHR.begin(), MSHR.end(), eq_addr<PACKET>(packet->address, OFFSET_BITS));
   auto first_unreturned = std::find_if(MSHR.begin(), MSHR.end(), [](auto x) { return x.event_cycle == std::numeric_limits<uint64_t>::max(); });
@@ -672,6 +1071,29 @@ void CACHE::return_data(PACKET* packet)
   mshr_entry->data = packet->data;
   mshr_entry->pf_metadata = packet->pf_metadata;
   mshr_entry->event_cycle = current_cycle + (warmup_complete[cpu] ? FILL_LATENCY : 0);
+
+  if (NAME == "LLC" && BLOCKHAMMER && all_warmup_complete > NUM_CPUS) {
+    uint64_t delay = 0;
+    if (CRA_ctr[packet->address/(DRAM_COLUMNS * BLOCK_SIZE)] > (RH_THRESHOLD/4)) {
+      uint64_t diff = CRA_ctr[packet->address/(DRAM_COLUMNS * BLOCK_SIZE)] - (RH_THRESHOLD/4);
+      uint64_t est_start_time = last_tracker_reset + ((diff - 1) * (256*1000*1000ull)/(RH_THRESHOLD/4));
+      if (est_start_time > current_cycle) {
+        delay = est_start_time - current_cycle;
+        if (delay >= (256*1000*1000)) {
+          std::cout << "[PANIC] Delay of more than 64ms in BH! curr_cycle: " << current_cycle
+                    << " est_start: " << est_start_time << " delay: " << delay
+                    << " CRA_ctr: " << CRA_ctr[packet->address/(DRAM_COLUMNS * BLOCK_SIZE)] << std::endl;
+          delay = 8000000ul; // Max delay of 8 Mn cycles (2ms which is max theoretical delay at T=128)
+        }
+      }
+    }
+    if (delay) {
+      s_BH_num_delay++;
+      s_BH_sum_delay += delay;
+      s_BH_max_delay = (s_BH_max_delay > delay) ? s_BH_max_delay : delay;
+      mshr_entry->event_cycle = current_cycle + delay;
+    }
+  }
 
   DP(if (warmup_complete[packet->cpu]) {
     std::cout << "[" << NAME << "_MSHR] " << __func__ << " instr_id: " << mshr_entry->instr_id;
@@ -723,7 +1145,8 @@ void CACHE::print_deadlock()
     std::size_t j = 0;
     for (PACKET entry : MSHR) {
       std::cout << "[" << NAME << " MSHR] entry: " << j++ << " instr_id: " << entry.instr_id;
-      std::cout << " address: " << std::hex << (entry.address >> LOG2_BLOCK_SIZE) << " full_addr: " << entry.address << std::dec << " type: " << +entry.type;
+      std::cout << " address: " << std::hex << (entry.address >> LOG2_BLOCK_SIZE) << " full_addr: " 
+      << entry.address << std::dec << " type: " << +entry.type;
       std::cout << " fill_level: " << +entry.fill_level << " event_cycle: " << entry.event_cycle << std::endl;
     }
   } else {

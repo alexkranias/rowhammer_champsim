@@ -27,7 +27,8 @@
 #include "cache.h"
 #include "champsim.h"
 #include "champsim_constants.h"
-#include "dram_controller.h"
+// #include "dram_controller.h"
+#include "dramsim3_wrapper.hpp"
 #include "ooo_cpu.h"
 #include "operable.h"
 #include "tracereader.h"
@@ -36,6 +37,8 @@
 uint8_t warmup_complete[NUM_CPUS] = {}, simulation_complete[NUM_CPUS] = {}, all_warmup_complete = 0, all_simulation_complete = 0,
         MAX_INSTR_DESTINATIONS = NUM_INSTR_DESTINATIONS, knob_cloudsuite = 0, knob_low_bandwidth = 0;
 
+char knob_cs_traces[NUM_CPUS] = {'n'};
+
 uint64_t warmup_instructions = 1000000, simulation_instructions = 10000000;
 
 auto start_time = time(NULL);
@@ -43,7 +46,8 @@ auto start_time = time(NULL);
 // For backwards compatibility with older module source.
 champsim::deprecated_clock_cycle current_core_cycle;
 
-extern MEMORY_CONTROLLER DRAM;
+// extern MEMORY_CONTROLLER DRAM;
+extern DRAMSim3_DRAM DRAM;
 extern VirtualMemory vmem;
 extern std::array<O3_CPU*, NUM_CPUS> ooo_cpu;
 extern std::array<CACHE*, NUM_CACHES> caches;
@@ -111,9 +115,99 @@ void print_roi_stats(uint32_t cpu, CACHE* cache)
 
     cout << cache->NAME;
     cout << " AVERAGE MISS LATENCY: " << (1.0 * (cache->total_miss_latency)) / TOTAL_MISS << " cycles" << endl;
-    // cout << " AVERAGE MISS LATENCY: " <<
-    // (cache->total_miss_latency)/TOTAL_MISS << " cycles " <<
-    // cache->total_miss_latency << "/" << TOTAL_MISS<< endl;
+  }
+  if (cache->NAME == "LLC" && cpu == NUM_CPUS - 1) {
+    std::cout << std::endl;
+    uint64_t llc_misses = 0;
+    for (uint32_t i = 0; i < NUM_TYPES; i++) 
+      for (uint j = 0; j < NUM_CPUS; j++)
+        llc_misses += cache->roi_miss[j][i];
+    std::cout << "LLC_MPKI " << (llc_misses*1000.0)/(simulation_instructions*NUM_CPUS) << std::endl;
+
+    float ipc = 0;
+    for (uint32_t i = 0; i < NUM_CPUS; i++) {
+      float core_ipc = ((float)ooo_cpu[i]->finish_sim_instr / ooo_cpu[i]->finish_sim_cycle);
+      ipc += core_ipc;
+      std::cout << "CORE_" << i << "_SIM_IPC " << core_ipc << std::endl;
+    }
+    std::cout << "SYSTEM_IPC " << ipc/(NUM_CPUS * 1.0) << std::endl;
+    
+    uint64_t avg_uniq_rows = cache->s_uniq_rows_ACT, avg_num_act = cache->s_num_ACT,
+              avg_num_mits = cache->s_num_mits;
+    uint64_t avg_sets_in_state[4];
+    if (cache->s_resets > 0) {
+      avg_uniq_rows = (cache->s_uniq_rows_ACT - cache->uniq_rows_ACT)/(cache->s_resets);
+      avg_num_act = (cache->s_num_ACT - cache->num_ACT)/(cache->s_resets);
+      avg_num_mits = (cache->s_num_mits - cache->num_mits)/(cache->s_resets);
+      for (int i = 1; i < 4; i++) {
+        avg_sets_in_state[i] = (cache->s_sets_in_state[i] - cache->sets_in_state[i])/(cache->s_resets);
+      }
+    }
+    else {
+      for (int i = 1; i < 4; i++) {
+        avg_sets_in_state[i] = cache->sets_in_state[i];
+      }
+    }
+    float avg_ways_used = 0.0;
+    if (ART_1B) {
+      avg_ways_used += cache->NUM_SET + 7*avg_sets_in_state[1];
+      avg_ways_used /= (cache->NUM_SET);
+    }
+    else {
+      avg_ways_used += cache->NUM_SET + 1*(avg_sets_in_state[1] - avg_sets_in_state[2])
+                       + 3*(avg_sets_in_state[2] - avg_sets_in_state[3]) + 7*avg_sets_in_state[3];
+      avg_ways_used /= (cache->NUM_SET);
+    }
+
+    cout << std::endl << "ROWHAMMER_DEFENSE_STATS" << std::endl;
+    cout << "LLC_RH_RESETS " << cache->s_resets << std::endl;
+    cout << "LLC_RH_UNIQ_ROWS_TOUCHED " << cache->s_uniq_rows_touched << std::endl;
+    cout << "LLC_RH_AVG_WAYS_USED " << avg_ways_used << std::endl;
+    for (int i = 1; i < 4; i++) {
+      cout << "LLC_RH_TOT_SETS_IN_STATE_" << i << " " << cache->s_sets_in_state[i]<< std::endl;
+      cout << "LLC_RH_AVG_SETS_IN_STATE_" << i << " " << avg_sets_in_state[i] << std::endl;
+      cout << "LLC_RH_CUR_SETS_IN_STATE_" << i << " " << cache->sets_in_state[i] << std::endl;
+    }
+    cout << "LLC_RH_TOT_UNIQ_ROWS " << cache->s_uniq_rows_ACT << std::endl;
+    cout << "LLC_RH_AVG_UNIQ_ROWS " << avg_uniq_rows << std::endl;
+    cout << "LLC_RH_CUR_UNIQ_ROWS " << cache->uniq_rows_ACT << std::endl;
+    cout << "LLC_RH_TOT_NUM_ACT " << cache->s_num_ACT << std::endl;
+    cout << "LLC_RH_AVG_NUM_ACT " << avg_num_act << std::endl;
+    cout << "LLC_RH_CUR_NUM_ACT " << cache->num_ACT << std::endl;
+    cout << "LLC_RH_TOT_NUM_MIT " << cache->s_num_mits << std::endl;
+    cout << "LLC_RH_AVG_NUM_MIT " << avg_num_mits << std::endl;
+    cout << "LLC_RH_CUR_NUM_MIT " << cache->num_mits << std::endl;
+    cout << "LLC_RH_MM_SET_EVICTS " << cache->s_mm_set_evicts << std::endl;
+    cout << "LLC_RH_MM_SET_MISSES " << cache->s_mm_set_misses << std::endl;
+    cout << std::endl;
+    for (int i = 0; i < 100; i++) {
+      cout << "LLC_RH_TOT_ROW_ACT_HIST_" << i*10+1 << " " << cache->s_row_ACT[i] << std::endl;
+    }
+    cout << std::endl;
+    if (cache->s_resets > 0) {
+      for (int i = 0; i < 100; i++) {
+        cout << "LLC_RH_AVG_ROW_ACT_HIST_" << i*10+1 << " " 
+              << (cache->s_row_ACT[i] - cache->row_ACT[i])/(cache->s_resets) << std::endl;
+      }
+    }
+    cout << std::endl;
+    for (int i = 0; i < 100; i++) {
+      cout << "LLC_RH_CUR_ROW_ACT_HIST_" << i*10+1 << " " << cache->row_ACT[i] << std::endl;
+    }
+    cout << std::endl;
+    cout << "LLC_EARLY_WRITEBACKS " << cache->s_early_writebacks << std::endl;
+    cout << "LLC_CTR_WAY_DATA_WB " << cache->s_ctr_way_data_wb << std::endl;
+    cout << "VMEM_PROC_PPAGES " << vmem.s_proc_ppages_used << std::endl;
+    cout << "VMEM_PT_PPAGES " << vmem.s_pt_ppages_used << std::endl;
+    cout << "DRAM_PPAGES_TOUCHED " 
+         << std::count(DRAM.procPageAccess, DRAM.procPageAccess + DRAM.numPPages, true) << std::endl;
+    cout << "DRAM_ACTS_OCC " << DRAM.ACTs.size() << std::endl;
+    cout << "DRAM_RHACTIONS_OCC " << DRAM.rhActions.size() << std::endl;
+    cout << "RH_BH_NUM_DELAY " << cache->s_BH_num_delay << std::endl;
+    cout << "RH_BH_SUM_DEAY " << cache->s_BH_sum_delay << std::endl;
+    cout << "RH_BH_MAX_DELAY " << cache->s_BH_max_delay << std::endl;
+    if (HYDRA_ENABLE)
+      cache->lower_level->detector->print_stats();
   }
 }
 
@@ -158,34 +252,6 @@ void print_branch_stats()
     cout << " Average ROB Occupancy at Mispredict: " << (1.0 * ooo_cpu[i]->total_rob_occupancy_at_branch_mispredict) / ooo_cpu[i]->branch_mispredictions
          << endl;
 
-    /*
-    cout << "Branch types" << endl;
-    cout << "NOT_BRANCH: " << ooo_cpu[i]->total_branch_types[0] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[0])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_DIRECT_JUMP: "
-    << ooo_cpu[i]->total_branch_types[1] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[1])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_INDIRECT: " <<
-    ooo_cpu[i]->total_branch_types[2] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[2])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_CONDITIONAL: "
-    << ooo_cpu[i]->total_branch_types[3] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[3])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_DIRECT_CALL: "
-    << ooo_cpu[i]->total_branch_types[4] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[4])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_INDIRECT_CALL:
-    " << ooo_cpu[i]->total_branch_types[5] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[5])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_RETURN: " <<
-    ooo_cpu[i]->total_branch_types[6] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[6])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl; cout << "BRANCH_OTHER: " <<
-    ooo_cpu[i]->total_branch_types[7] << " " <<
-    (100.0*ooo_cpu[i]->total_branch_types[7])/(ooo_cpu[i]->num_retired -
-    ooo_cpu[i]->begin_sim_instr) << "%" << endl << endl;
-    */
-
     cout << "Branch type MPKI" << endl;
     cout << "BRANCH_DIRECT_JUMP: " << (1000.0 * ooo_cpu[i]->branch_type_misses[1] / (ooo_cpu[i]->num_retired - ooo_cpu[i]->begin_sim_instr)) << endl;
     cout << "BRANCH_INDIRECT: " << (1000.0 * ooo_cpu[i]->branch_type_misses[2] / (ooo_cpu[i]->num_retired - ooo_cpu[i]->begin_sim_instr)) << endl;
@@ -196,49 +262,65 @@ void print_branch_stats()
   }
 }
 
-void print_dram_stats()
-{
-  uint64_t total_congested_cycle = 0;
-  uint64_t total_congested_count = 0;
+// void print_dram_stats()
+// {
+//   uint64_t total_congested_cycle = 0;
+//   uint64_t total_congested_count = 0;
 
-  std::cout << std::endl;
-  std::cout << "DRAM Statistics" << std::endl;
-  for (uint32_t i = 0; i < DRAM_CHANNELS; i++) {
-    std::cout << " CHANNEL " << i << std::endl;
+//   std::cout << std::endl;
+//   std::cout << "DRAM Statistics" << std::endl;
+//   for (uint32_t i = 0; i < DRAM_CHANNELS; i++) {
+//     std::cout << " CHANNEL " << i << std::endl;
 
-    auto& channel = DRAM.channels[i];
-    std::cout << " RQ ROW_BUFFER_HIT: " << std::setw(10) << channel.RQ_ROW_BUFFER_HIT << " ";
-    std::cout << " ROW_BUFFER_MISS: " << std::setw(10) << channel.RQ_ROW_BUFFER_MISS;
-    std::cout << std::endl;
+//     auto& channel = DRAM.channels[i];
+//     std::cout << " RQ ROW_BUFFER_HIT: " << std::setw(10) << channel.RQ_ROW_BUFFER_HIT << " ";
+//     std::cout << " ROW_BUFFER_MISS: " << std::setw(10) << channel.RQ_ROW_BUFFER_MISS;
+//     std::cout << std::endl;
 
-    std::cout << " DBUS AVG_CONGESTED_CYCLE: ";
-    if (channel.dbus_count_congested)
-      std::cout << std::setw(10) << ((double)channel.dbus_cycle_congested / channel.dbus_count_congested);
-    else
-      std::cout << "-";
-    std::cout << std::endl;
+//     std::cout << " DBUS AVG_CONGESTED_CYCLE: ";
+//     if (channel.dbus_count_congested)
+//       std::cout << std::setw(10) << ((double)channel.dbus_cycle_congested / channel.dbus_count_congested);
+//     else
+//       std::cout << "-";
+//     std::cout << std::endl;
 
-    std::cout << " WQ ROW_BUFFER_HIT: " << std::setw(10) << channel.WQ_ROW_BUFFER_HIT << " ";
-    std::cout << " ROW_BUFFER_MISS: " << std::setw(10) << channel.WQ_ROW_BUFFER_MISS << " ";
-    std::cout << " FULL: " << std::setw(10) << channel.WQ_FULL;
-    std::cout << std::endl;
+//     std::cout << " WQ ROW_BUFFER_HIT: " << std::setw(10) << channel.WQ_ROW_BUFFER_HIT << " ";
+//     std::cout << " ROW_BUFFER_MISS: " << std::setw(10) << channel.WQ_ROW_BUFFER_MISS << " ";
+//     std::cout << " FULL: " << std::setw(10) << channel.WQ_FULL;
+//     std::cout << std::endl;
 
-    std::cout << std::endl;
+//     std::cout << std::endl;
 
-    total_congested_cycle += channel.dbus_cycle_congested;
-    total_congested_count += channel.dbus_count_congested;
-  }
+//     total_congested_cycle += channel.dbus_cycle_congested;
+//     total_congested_count += channel.dbus_count_congested;
+//   }
 
-  if (DRAM_CHANNELS > 1) {
-    std::cout << " DBUS AVG_CONGESTED_CYCLE: ";
-    if (total_congested_count)
-      std::cout << std::setw(10) << ((double)total_congested_cycle / total_congested_count);
-    else
-      std::cout << "-";
+//   uint64_t uniqRows = 0;
+//   for (int ch = 0; ch < DRAM_CHANNELS; ch++) {
+//     for (int ra = 0; ra < DRAM_RANKS; ra++) {
+//       for (int ba = 0; ba < DRAM_BANKS; ba++) {
+//         for (int ro = 0; ro < DRAM_ROWS; ro++) {
+//           if (DRAM.isUniqRowCheck[ch][ra][ba][ro])
+//             uniqRows++;
+//         }
+//       }
+//     }
+//   }
+//   std::cout << "RH_UNIQ_ROWS_CHECK " << uniqRows << std::endl;
+//   std::cout << "DRAM_RQ_MERGED " << DRAM.s_rq_merged << std::endl;
+//   std::cout << "DRAM_RQ_FORWARDED " << DRAM.s_rq_forwarded << std::endl;
+//   std::cout << "DRAM_WQ_DUPLICATES " << DRAM.s_wq_duplicates << std::endl;
 
-    std::cout << std::endl;
-  }
-}
+//   if (DRAM_CHANNELS > 1) {
+//     std::cout << " DBUS AVG_CONGESTED_CYCLE: ";
+//     if (total_congested_count)
+//       std::cout << std::setw(10) << ((double)total_congested_cycle / total_congested_count);
+//     else
+//       std::cout << "-";
+
+//     std::cout << std::endl;
+//   }
+// }
 
 void reset_cache_stats(uint32_t cpu, CACHE* cache)
 {
@@ -304,13 +386,13 @@ void finish_warmup()
   }
   cout << endl;
 
-  // reset DRAM stats
-  for (uint32_t i = 0; i < DRAM_CHANNELS; i++) {
-    DRAM.channels[i].WQ_ROW_BUFFER_HIT = 0;
-    DRAM.channels[i].WQ_ROW_BUFFER_MISS = 0;
-    DRAM.channels[i].RQ_ROW_BUFFER_HIT = 0;
-    DRAM.channels[i].RQ_ROW_BUFFER_MISS = 0;
-  }
+  // // reset DRAM stats
+  // for (uint32_t i = 0; i < DRAM_CHANNELS; i++) {
+  //   DRAM.channels[i].WQ_ROW_BUFFER_HIT = 0;
+  //   DRAM.channels[i].WQ_ROW_BUFFER_MISS = 0;
+  //   DRAM.channels[i].RQ_ROW_BUFFER_HIT = 0;
+  //   DRAM.channels[i].RQ_ROW_BUFFER_MISS = 0;
+  // }
 }
 
 void signal_handler(int signal)
@@ -340,6 +422,7 @@ int main(int argc, char** argv)
                                          {"hide_heartbeat", no_argument, 0, 'h'},
                                          {"cloudsuite", no_argument, 0, 'c'},
                                          {"traces", no_argument, &traces_encountered, 1},
+                                         {"cs_traces", required_argument, 0, 's'},
                                          {0, 0, 0, 0}};
 
   int c;
@@ -356,7 +439,13 @@ int main(int argc, char** argv)
       break;
     case 'c':
       knob_cloudsuite = 1;
+      for (uint64_t i = 0; i < NUM_CPUS; i++)
+        knob_cs_traces[i] = 'y';
       MAX_INSTR_DESTINATIONS = NUM_INSTR_DESTINATIONS_SPARC;
+      break;
+    case 's':
+      for (uint64_t i = 0; i < NUM_CPUS; i++) 
+        knob_cs_traces[i] = optarg[i];
       break;
     case 0:
       break;
@@ -368,6 +457,7 @@ int main(int argc, char** argv)
   cout << "Warmup Instructions: " << warmup_instructions << endl;
   cout << "Simulation Instructions: " << simulation_instructions << endl;
   cout << "Number of CPUs: " << NUM_CPUS << endl;
+  cout << "knob_cs_traces: " << string(knob_cs_traces) << endl;
 
   long long int dram_size = DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS * DRAM_ROWS * DRAM_COLUMNS * BLOCK_SIZE / 1024 / 1024; // in MiB
   std::cout << "Off-chip DRAM Size: ";
@@ -375,7 +465,8 @@ int main(int argc, char** argv)
     std::cout << dram_size / 1024 << " GiB";
   else
     std::cout << dram_size << " MiB";
-  std::cout << " Channels: " << DRAM_CHANNELS << " Width: " << 8 * DRAM_CHANNEL_WIDTH << "-bit Data Rate: " << DRAM_IO_FREQ << " MT/s" << std::endl;
+  std::cout << " Channels: " << DRAM_CHANNELS << " Width: " << 8 * DRAM_CHANNEL_WIDTH 
+            << "-bit Data Rate: " << 2*DRAM_IO_FREQ << " MT/s" << std::endl;
 
   std::cout << std::endl;
   std::cout << "VirtualMemory physical capacity: " << std::size(vmem.ppage_free_list) * vmem.page_size;
@@ -383,22 +474,32 @@ int main(int argc, char** argv)
   std::cout << "VirtualMemory page size: " << PAGE_SIZE << " log2_page_size: " << LOG2_PAGE_SIZE << std::endl;
 
   std::cout << std::endl;
-  for (int i = optind; i < argc; i++) {
-    std::cout << "CPU " << traces.size() << " runs " << argv[i] << std::endl;
+  if (argc - optind == NUM_CPUS) {
+    std::cout << "Assigning traces to CPUs" << std::endl;
+    for (int i = optind; i < argc; i++) {
+      std::cout << "CPU " << traces.size() << " runs " << argv[i] << " CS=" << knob_cs_traces[traces.size()] << std::endl;
+      traces.push_back(get_tracereader(argv[i], traces.size(), knob_cs_traces[traces.size()] == 'y' ? true : false));
 
-    traces.push_back(get_tracereader(argv[i], traces.size(), knob_cloudsuite));
+      if (traces.size() > NUM_CPUS) {
+        printf("\n*** Too many traces for the configured number of cores ***\n\n");
+        assert(0);
+      }
+    }
 
-    if (traces.size() > NUM_CPUS) {
-      printf("\n*** Too many traces for the configured number of cores ***\n\n");
+    if (traces.size() != NUM_CPUS) {
+      printf("\n*** Not enough traces for the configured number of cores ***\n\n");
       assert(0);
     }
   }
+  else {
+    std::cout << "All CPUs run trace-0" << std::endl;
+    for (int i = 0; i < NUM_CPUS; i++) {
+      std::cout << "CPU " << i << " runs " << argv[optind] << std::endl;
 
-  if (traces.size() != NUM_CPUS) {
-    printf("\n*** Not enough traces for the configured number of cores ***\n\n");
-    assert(0);
+      traces.push_back(get_tracereader(argv[optind], i, knob_cs_traces[traces.size()] == 'y' ? true : false));
+    }
   }
-  // end trace file setup
+
 
   // SHARED CACHE
   for (O3_CPU* cpu : ooo_cpu) {
@@ -451,7 +552,8 @@ int main(int argc, char** argv)
 
         cout << "Heartbeat CPU " << i << " instructions: " << ooo_cpu[i]->num_retired << " cycles: " << ooo_cpu[i]->current_cycle;
         cout << " heartbeat IPC: " << heartbeat_ipc << " cumulative IPC: " << cumulative_ipc;
-        cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) " << endl;
+        cout << " (Simulation time: " << elapsed_hour << " hr " << elapsed_minute << " min " << elapsed_second << " sec) ";
+        cout << endl;
         ooo_cpu[i]->next_print_instruction += STAT_PRINTING_PERIOD;
 
         ooo_cpu[i]->last_sim_instr = ooo_cpu[i]->num_retired;
@@ -520,7 +622,8 @@ int main(int argc, char** argv)
     (*it)->impl_replacement_final_stats();
 
 #ifndef CRC2_COMPILE
-  print_dram_stats();
+  // print_dram_stats();
+  DRAM.PrintStats();
   print_branch_stats();
 #endif
 

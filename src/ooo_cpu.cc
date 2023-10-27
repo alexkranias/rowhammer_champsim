@@ -23,7 +23,7 @@
 #include "champsim.h"
 #include "instruction.h"
 
-#define DEADLOCK_CYCLE 1000000
+#define DEADLOCK_CYCLE 1000000000ull
 
 extern uint8_t warmup_complete[NUM_CPUS];
 extern uint8_t MAX_INSTR_DESTINATIONS;
@@ -222,18 +222,22 @@ void O3_CPU::init_instruction(ooo_model_instr arch_instr)
 
     num_branch++;
 
-    std::pair<uint64_t, uint8_t> btb_result = impl_btb_prediction(arch_instr.ip, arch_instr.branch_type);
-    uint64_t predicted_branch_target = btb_result.first;
-    uint8_t always_taken = btb_result.second;
-    uint8_t branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch_type);
-    if ((branch_prediction == 0) && (always_taken == 0)) {
-      predicted_branch_target = 0;
-    }
+    // BP_BYPASS
+    // std::pair<uint64_t, uint8_t> btb_result = impl_btb_prediction(arch_instr.ip, arch_instr.branch_type);
+    // uint64_t predicted_branch_target = btb_result.first;
+    // uint8_t always_taken = btb_result.second;
+    uint64_t predicted_branch_target = arch_instr.branch_target;
+    uint8_t always_taken = arch_instr.branch_taken;
+    // BP_BYPASS
+    // uint8_t branch_prediction = impl_predict_branch(arch_instr.ip, predicted_branch_target, always_taken, arch_instr.branch_type);
+    // if ((branch_prediction == 0) && (always_taken == 0)) {
+    //   predicted_branch_target = 0;
+    // }
 
     // call code prefetcher every time the branch predictor is used
     impl_prefetcher_branch_operate(arch_instr.ip, arch_instr.branch_type, predicted_branch_target);
 
-    if (predicted_branch_target != arch_instr.branch_target) {
+    if (predicted_branch_target != arch_instr.branch_target  && false /* BP_BYPASS add */) {
       branch_mispredictions++;
       total_rob_occupancy_at_branch_mispredict += ROB.occupancy();
       branch_type_misses[arch_instr.branch_type]++;
@@ -249,9 +253,9 @@ void O3_CPU::init_instruction(ooo_model_instr arch_instr)
         instrs_to_read_this_cycle = 0;
       }
     }
-
-    impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
-    impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+    // BP_BYPASS
+    // impl_update_btb(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
+    // impl_last_branch_result(arch_instr.ip, arch_instr.branch_target, arch_instr.branch_taken, arch_instr.branch_type);
   }
 
   arch_instr.event_cycle = current_cycle;
@@ -869,6 +873,7 @@ void O3_CPU::execute_store(std::vector<LSQ_ENTRY>::iterator sq_it)
                                                                      // instruction can issue multiple loads
 
           // now we can resolve RAW dependency
+          // printf("%lu, %lu\n", dependent->lq_index[j]->producer_id, sq_it->instr_id);
           assert(dependent->lq_index[j]->producer_id == sq_it->instr_id);
           // update corresponding LQ entry
           do_sq_forward_to_lq(*sq_it, *(dependent->lq_index[j]));
