@@ -1,73 +1,51 @@
-<p align="center">
-  <h1 align="center"> ChampSim </h1>
-  <p> ChampSim is a trace-based simulator for a microarchitecture study. You can sign up to the public mailing list by sending an empty mail to champsim+subscribe@googlegroups.com. If you have questions about how to use ChampSim, you can often receive a quicker response on the mailing list. Please reserve GitHub Issues for bugs. <p>
-</p>
+This repository is part of the evaluation artifact for [START](https://arxiv.org/abs/2308.14889), a Sclable Tracker for Any Rowhammer Threshold, which will appear at [HPCA 2024](https://www.hpca-conf.org/2024/). 
 
-# Clone ChampSim repository
-```
-git clone https://github.com/ChampSim/ChampSim.git
-```
+## Introduction
 
-# Compile
+Experiments in the START paper are conducted using [ChampSim](https://github.com/ChampSim/ChampSim), a cycle-level multi-core simulator, interfaced with [DRAMSim3](https://github.com/umd-memsys/DRAMsim3), a detailed memory system simulator. The trace download and jobfile management is borrowed from the infrastructure used in [Pythia](https://github.com/CMU-SAFARI/Pythia). Accordingly, the code and experimentation framework of START has been partitioned into 3 repositories for modularity. 
 
-ChampSim takes a JSON configuration script. Examine `champsim_config.json` for a fully-specified example. All options described in this file are optional and will be replaced with defaults if not specified. The configuration scrip can also be run without input, in which case an empty file is assumed.
-```
-$ ./config.sh <configuration file>
-$ make
-```
+This repository hosts the ChampSim simulator codebase for START, Hydra, and Ideal trackers using victim-refresh mitigation with configurable blast-radius. 
 
-# Download DPC-3 trace
+**NOTE:** The documentation is common across all 3 repositories, so feel free to start here.
 
-Traces used for the 3rd Data Prefetching Championship (DPC-3) can be found here. (https://dpc3.compas.cs.stonybrook.edu/champsim-traces/speccpu/) A set of traces used for the 2nd Cache Replacement Championship (CRC-2) can be found from this link. (http://bit.ly/2t2nkUj)
+## System Requirements
 
-Storage for these traces is kindly provided by Daniel Jimenez (Texas A&M University) and Mike Ferdman (Stony Brook University). If you find yourself frequently using ChampSim, it is highly encouraged that you maintain your own repository of traces, in case the links ever break.
+   - **SW Dependencies** 
+     - Tested with cmake XYZ, g++ XYZ, md5sum XYZ, perl XYZ, megatools 1.11.0, and Python XYZ.
+   - **Benchmark Dependencies** 
+     - Publicly available ChampSim-compatible traces of SPEC2017, LIGRA, PARSEC, and CloudSuite workloads.
+   - **HW Dependencies** 
+     - A scale-out system like many-core server or HPC cluster.
+     - Our experiments were performed on the [PACE](https://pace.gatech.edu) cluster at Georgia Tech.
+     - Most configurations run simulations for 28 workloads for about 6 hours on average (with one workload per core).
+     - Overall, there are 48 configurations, requiring about 8,900 core-hours to replicate all results (about 1-2 days on four 64-core servers).
 
-# Run simulation
+**NOTE:** If compute resources are limited, we consider the key results of the paper to be those displayed in Figure 6 and Figure 16, which correspond to 9 configurations, requiring about 2,000 core-hours (about 1-2 days on a 64-core server).
 
-Execute the binary directly.
-```
-$ bin/champsim --warmup_instructions 200000000 --simulation_instructions 500000000 ~/path/to/traces/600.perlbench_s-210B.champsimtrace.xz
-```
+## Compilation Steps
 
-The number of warmup and simulation instructions given will be the number of instructions retired. Note that the statistics printed at the end of the simulation include only the simulation phase.
-
-# Add your own branch predictor, data prefetchers, and replacement policy
-**Copy an empty template**
-```
-$ mkdir prefetcher/mypref
-$ cp prefetcher/no_l2c/no.cc prefetcher/mypref/mypref.cc
-```
-
-**Work on your algorithms with your favorite text editor**
-```
-$ vim prefetcher/mypref/mypref.cc
-```
-
-**Compile and test**
-Add your prefetcher to the configuration file.
-```
-{
-    "L2C": {
-        "prefetcher": "mypref"
-    }
-}
-```
-Note that the example prefetcher is an L2 prefetcher. You might design a prefetcher for a different level.
+The expected directory structure is:
 
 ```
-$ ./config.sh <configuration file>
-$ make
-$ bin/champsim --warmup_instructions 200000000 --simulation_instructions 500000000 600.perlbench_s-210B.champsimtrace.xz
+start_hpca24_ae
+|-dramsim3
+|-champsim
+|-experiments
 ```
 
-# How to create traces
+* `mkdir start_hpca24_ae`
 
-Program traces are available in a variety of locations, however, many ChampSim users wish to trace their own programs for research purposes.
-Example tracing utilities are provided in the `tracer/` directory.
+### Build DRAMSim3
 
-# Evaluate Simulation
+* `git clone https://github.com/Anish-Saxena/rowhammer_dramsim3 dramsim3`
+* `cd dramsim3`
+* `mkdir build && cd build && cmake ..`
+* `make -j8`
+* `cd ..`
 
-ChampSim measures the IPC (Instruction Per Cycle) value as a performance metric. <br>
-There are some other useful metrics printed out at the end of simulation. <br>
+### Build ChampSim3
 
-Good luck and be a champion! <br>
+* `git clone https://github.com/Anish-Saxena/rowhammer_champsim champsim`
+* `cd champsim`
+*  `./set_paths.sh`
+
