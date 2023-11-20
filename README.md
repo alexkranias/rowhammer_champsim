@@ -152,4 +152,8 @@ Note that you need to create jobfiles for 8-core all-workloads (`START_8C_ALL.tl
 
 ## Collect Statistics
 
+Work-in-progress.
+
+## Visualize Results and Recreate Figures
+
 Work-in-progress. 
