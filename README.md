@@ -141,7 +141,7 @@ Please customize `create_jobfile.pl` to create jobfiles to the format needed for
 
 Note that you need to create jobfiles for 8-core all-workloads (`START_8C_ALL.tlist`), 8-core single-workloads (`START_8C_SINGLE.tlist`), and 1-core all-workloads (`START_1C_ALL.tlist`). Be sure to following the jobfile naming convention discussed in Option-2. 
 
-**After referring to options above, proceed with launching experiments below.**
+**After referring to options above, proceed with launching experiments below.** One required change is updating the paths to champsim binary and traces in all three main jobfiles, and can be done easily with find and replace.
 
 3. After making changes, run `./setup_exps.sh` to recreate jobfiles for all configurations.
 
