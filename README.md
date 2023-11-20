@@ -13,16 +13,16 @@ This repository hosts the ChampSim simulator codebase for START, Hydra, and Idea
 ## System Requirements
 
    - **SW Dependencies** 
-     - Tested with cmake XYZ, g++ XYZ, md5sum XYZ, perl XYZ, megatools 1.11.0, and Python XYZ.
+     - Tested with cmake v3.23.1, g++ v10.3.0, md5sum v8.22, perl v5.16.3, megatools 1.11.0, and Python XYZ.
    - **Benchmark Dependencies** 
      - Publicly available ChampSim-compatible traces of SPEC2017, LIGRA, PARSEC, and CloudSuite workloads.
    - **HW Dependencies** 
      - A scale-out system like many-core server or HPC cluster.
      - Our experiments were performed on the [PACE](https://pace.gatech.edu) cluster at Georgia Tech.
-     - Most configurations run simulations for 28 workloads for about 6 hours on average (with one workload per core).
-     - Overall, there are 48 configurations, requiring about 8,900 core-hours to replicate all results (about 1-2 days on four 64-core servers).
+     - Most configurations run simulations for 28 workloads for about 6 hours on average (with one workload per core). Some configurations run 51 workloads per configurations.
+     - Overall, there are 48 configurations, requiring about 9,000 core-hours to replicate all results (about 1-2 days on four 64-core servers).
 
-**NOTE:** If compute resources are limited, we consider the key results of the paper to be those displayed in Figure 6 and Figure 16, which correspond to 9 configurations, requiring about 2,000 core-hours (about 1-2 days on a 64-core server).
+**NOTE:** If compute resources are limited, we consider the key results of the paper to be those displayed in Figure 6, 7, 8, 13, 14, and 16, which corresponds to 16 configurations, requiring about 3,600 core-hours (about 1-2 days on a 64-core server).
 
 ## Compilation Steps
 
@@ -86,9 +86,33 @@ DRAMSim3 is loaded as a dynamically linked library and requires updating `LD_LIB
 
 ### Test Setup with Dummy Run
 
-* `cd champsim/bin/`
-* `./8C_16WLLC --simulation_instruction=100000 --warmup_instructions=1000000 -traces $PYTHIA_HOME/traces/602.gcc_s-1850B.champsimtrace.xz`
+* `cd champsim`
+* `./test_setup.sh`
 
-Running this trace for 100K warmup and 100K simulation instructions should take about a minute. Ensure that the simulation completes successfully (you will see simulation statistics in stdout).
+Running this trace for 100K warmup and 100K simulation instructions should take about a minute. Ensure that the simulation completes successfully; you will see the message `SETUP TESTED SUCCESSFULLY` at the end of the output.
 
-**Common Error:** If the loader is unable to find the dramsim3 library, please ensure the updated `LD_LIBRARY_PATH` variable is available in the execution environment (like, if srun-like commands are used). A simple workaround is to create a script that exports this variable and then runs the executable. 
+**Common Error:** If the loader is unable to find the dramsim3 library, please ensure the updated `LD_LIBRARY_PATH` variable is available in the execution environment (for example, if srun-like commands are used). 
+
+## Experimental Workflow
+
+START adopts [Pythia's](https://github.com/CMU-SAFARI/Pythia) experimental workflow by launching experiments preferably on an HPC compute cluster followed by rolling up statistics.
+
+Each configuration runs either 28 workloads (used in the main apper) or all 51 workloads (used in appendix). Overall, there are 48 configurations required to recreate all figures in the paper, and 16 configurations to recreate the representative figures.
+
+### Build ChampSim Configurations
+
+1. `cd champsim`
+2. If recreating all figures, `./build_configs.sh configs/all_figures.configs`. Otherwise, `./build_configs.sh configs/representative_figures.configs`.
+
+### Launch Experiments
+
+Recreating all figures requires 1528 experiment runs (each requiring one core and 4GB memory). Recreating representative figures requires 609 experiments runs. Each experiment requires 6 core-hours on average, or about 9K core-hours to recreate all experiments and 3.6K core-hours to recreate representative experiments. 
+
+#### Option-1: Using Slurm
+
+1. Select whether you will recreate all figures or only representative figures and check out `experiments/experiments/all_figures/` or `experiments/experiments/representative_figures/` directory, respectively. 
+2. The `configure.csv` file provides details about each configuration (best viewed in Google Sheets/ Excel).
+
+The directories for each required configuration have already been set up. The sample jobfile within each directory assumes usage of `slurm` scheduler (typically when using an HPC cluster). For each configuration, the only difference in jobfiles is the ChampSim binary used, so all jobfiles are created using the following 3 jobfiles:
+
+- `experiments/experiments/1C_all_workloads.sh`: Baseline 
