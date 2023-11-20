@@ -108,11 +108,48 @@ Each configuration runs either 28 workloads (used in the main apper) or all 51 w
 
 Recreating all figures requires 1528 experiment runs (each requiring one core and 4GB memory). Recreating representative figures requires 609 experiments runs. Each experiment requires 6 core-hours on average, or about 9K core-hours to recreate all experiments and 3.6K core-hours to recreate representative experiments. 
 
-#### Option-1: Using Slurm
-
 1. Select whether you will recreate all figures or only representative figures and check out `experiments/experiments/all_figures/` or `experiments/experiments/representative_figures/` directory, respectively. 
 2. The `configure.csv` file provides details about each configuration (best viewed in Google Sheets/ Excel).
 
-The directories for each required configuration have already been set up. The sample jobfile within each directory assumes usage of `slurm` scheduler (typically when using an HPC cluster). For each configuration, the only difference in jobfiles is the ChampSim binary used, so all jobfiles are created using the following 3 jobfiles:
+The directories for each required configuration have already been set up. Next, make any changes necessary to run the configuration on your machine. **Refer to options below before proceeding to next steps.**
 
-- `experiments/experiments/1C_all_workloads.sh`: Baseline 
+#### Option-1: Using Slurm
+
+The sample jobfile within each directory assumes usage of `slurm` scheduler (typically when using an HPC cluster). For each configuration, the only difference in jobfiles is the ChampSim binary used, so all jobfiles are created using the following 3 jobfiles:
+
+- `experiments/experiments/1C_all_workloads.sh`: Baseline single-core experiments used to compute weighted speedup. 44 workloads.
+- `experiments/experiments/single_workloads.sh`: Multi-core experiments with same workload on each core. 28 workloads.
+- `experiments/experiments/all_workloads.sh`: All multi-core experiments (single, mixed, cloudsuite). 51 workloads.
+
+We recommend making any changes to these three jobfiles (such as specifying the charge account for `slurm`, etc.), as required. Alternatively, try running a jobfile inside a directory within `experiments/experiments/all_figures/` to ensure it works (for example, `cd 8C_16WLLC && sbatch jobfile.sh`).
+
+#### Option-2: Running Locally
+
+Similar to the `slurm` option, we provide three jobfiles from which all configuration jobfiles can be derived:
+
+- `experiments/experiments/1C_all_workloads.local.sh`: Baseline single-core experiments used to compute weighted speedup. 44 workloads.
+- `experiments/experiments/single_workloads.local.sh`: Multi-core experiments with same workload on each core. 28 workloads.
+- `experiments/experiments/all_workloads.local.sh`: All multi-core experiments (single, mixed, cloudsuite). 51 workloads.
+
+We recommend making any changes to these three jobfiles as required. Alternatively, try running a jobfile inside a directory within `experiments/experiments/all_figures/` to ensure it works (for example, `cd 8C_16WLLC && ./jobfile.sh`).
+
+#### Option-3: Create Your Own Jobfiles
+
+Please customize `create_jobfile.pl` to create jobfiles to the format needed for launching experiments on your machine. Create the new jobfile comprising all experiments using the following command:
+
+`perl ../scripts/create_jobfile.pl --exe $PYTHIA_HOME/../champsim/bin/8C_16WLLC --tlist START_8C_ALL.tlist --exp START.exp --local 1 > single_workloads.local.sh`
+
+Note that you need to create jobfiles for 8-core all-workloads (`START_8C_ALL.tlist`), 8-core single-workloads (`START_8C_SINGLE.tlist`), and 1-core all-workloads (`START_1C_ALL.tlist`). Be sure to following the jobfile naming convention discussed in Option-2. 
+
+**After referring to options above, proceed with launching experiments below.**
+
+3. After making changes, run `./setup_exps.sh` to recreate jobfiles for all configurations.
+
+4. Finally, launch experiments. 
+    * **Option-1**: We provide a helper script `launch_exps.sh` that launches all experiments using the `sbatch` command. 
+    * **Option-2 or 3**: If running locally, please launch each configuration manually and ensure number of running experiments are less than number of cores at any given time (otherwise context switches can degrade performance).
+
+
+## Collect Statistics
+
+Work-in-progress. 
