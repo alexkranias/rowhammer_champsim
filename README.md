@@ -152,8 +152,18 @@ Note that you need to create jobfiles for 8-core all-workloads (`START_8C_ALL.tl
 
 ## Collect Statistics
 
-Work-in-progress.
+**Update 11/30/2023**
+
+We added stat collection scripts for Figures 2, 6, 7, 8, 13, and 14. They are located in `experiments/graphs/stat_scripts/` directory. Please run the script for each figure, which will parse and collect relevant statistics (like normalized IPC, relative cache misses, etc.) into csv files stored in `experiments/graphs/stat_scripts/data/` directory.
+
+The scripts assume `reprsentative_figures` are being recreated. If the simulation results are present in `all_figures`, please change the `STAT_DIR` variable in the `Figure_*.sh` scripts. 
+
+We will add parsing scripts for remaining figures shortly.
 
 ## Visualize Results and Recreate Figures
 
-Work-in-progress. 
+**Update 11/30/2023**
+
+Please find the Jupyter notebook to plot all figures in `experiments/graphs/plotting_nb/` directory. It can be launched using `jupyter-notebook START_plots.ipynb` command. Please be sure the requisite python package are installed, including matplotlib, numpy, pandas, and seaborn. 
+
+After the parsing script for a figure has been run, you can re-run the cell corresponding to that figure to recreate it.
