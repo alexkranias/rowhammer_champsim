@@ -6,6 +6,7 @@
 8C_16W_512GB.json
 8C_16W.json
 8C_1b_T64.json
+8C_1b_T256.json
 8C_2b_1.5MB_T16.json
 8C_2b_1.5MB_T256.json
 8C_2b_1.5MB_T64.json
