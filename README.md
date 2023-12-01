@@ -152,6 +152,10 @@ Note that you need to create jobfiles for 8-core all-workloads (`START_8C_ALL.tl
 
 ## Collect Statistics
 
+**Update 12/1/2023**
+
+We have added parsing scripts for remaining figures 9, 10, and 15. All figures are now reproduceable. 
+
 **Update 11/30/2023**
 
 We added stat collection scripts for Figures 2, 6, 7, 8, 13, 14, and 16 (that is, all representative figures along with motivation figure 2). They are located in `experiments/graphs/stat_scripts/` directory. Please run the script for each figure (`Figure_*.sh`), which will parse and collect relevant statistics (like normalized IPC, relative cache misses, etc.) into csv files stored in `experiments/graphs/stat_scripts/data/` directory.
