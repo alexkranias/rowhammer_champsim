@@ -320,7 +320,7 @@ void HotDataDetector::print_stats(){
             for (int ba = 0; ba < numBanks; ba++) {
                 for (int ro = 0; ro < numRows; ro++) {
                     for (int block = 0; block < cacheBlocksPerRow; block++) {
-                        access_counts.push(std::make_pair(hot_data_counter[ch][ra][ba][ro][block], std::make_tuple(ch, ra, ba, ro, block)));
+                        access_counts.push(std::make_pair(hot_data_counter[ch][ra][ba][ro][block], std::make_tuple(ch, ra, ba, ro, block))); //
                     }
                 }
             }
