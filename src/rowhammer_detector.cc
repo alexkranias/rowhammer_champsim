@@ -212,6 +212,152 @@ void Hydra::print_stats(){
               << "H_RCT_INIT " << s_rct_init << std::endl;
 }
 
+HotDataDetector::HotDataDetector(uint16_t __dramRowSizeBytes, uint16_t __cacheLinesSizeBytes, uint32_t __numRows,
+                uint8_t __numBanks, uint8_t __numRanks, uint8_t __numChannels) {
+
+
+    numBanks = __numBanks;
+    numRanks = __numRanks;
+    numChannels = __numChannels;
+    numRows = __numRows;
+    numDRAMRows = __numRows*__numBanks*__numRanks*__numChannels;
+
+    cacheLinesSizeBytes = __cacheLinesSizeBytes;
+    dramRowSizeBytes = __dramRowSizeBytes;
+
+    cacheLinesPerRow = dramRowSizeBytes / cacheLinesSizeBytes;
+
+    hot_data_counter = (u_int32_t**) calloc(sizeof(*hot_data_counter), numDRAMRows);
+
+    for (int row = 0; row < numDRAMRows; row++) {
+        hot_data_counter[row] = (u_int32_t*) calloc(sizeof(u_int32_t), cacheLinesPerRow);
+    }
+}
+
+void HotDataDetector::reset() {
+    for (int row = 0; row < numDRAMRows; row++) {
+        for (int line = 0; line < cacheLinesPerRow; line++) {        
+            hot_data_counter[row][line] = 0;
+        }
+    }
+}
+
+/**
+ * @param address the physical address being accessed
+*/
+void HotDataDetector::access(uint64_t address) {
+    u_int64_t row_number = address / dramRowSizeBytes;
+    u_int32_t cache_line_number = (address / cacheLinesSizeBytes) % cacheLinesPerRow;
+    
+    if (hot_data_counter == nullptr) {
+        throw std::runtime_error("hot_data_counter not initialized");
+    }
+    if (hot_data_counter[row_number] == nullptr) {
+        throw std::runtime_error("ROW" + std::to_string(row_number) + " not initialized in hot_data_counter");
+    }
+
+    hot_data_counter[row_number][cache_line_number]++;
+}
+
+/**
+ * @brief Records an access to a specific physical address in DRAM.
+ * 
+ * @param ch Channel address within the DRAM system.
+ * @param ra Rank address within a DRAM module.
+ * @param ba Bank address within a DRAM rank.
+ * @param ro Row address within a DRAM bank.
+ * @param co Column address within a DRAM row.
+ */
+void HotDataDetector::access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co) {
+    uint64_t row_number = ch * (numRanks * numBanks * numRows) +
+                          ra * (numBanks * numRows) +
+                          ba * numRows +
+                          ro;
+
+    u_int32_t cache_line_number = co / cacheLinesSizeBytes; // cache block index
+    
+    if (hot_data_counter == nullptr) {
+        throw std::runtime_error("hot_data_counter not initialized");
+    }
+    if (hot_data_counter[row_number] == nullptr) {
+        throw std::runtime_error("ROW" + std::to_string(row_number) + " not initialized in hot_data_counter");
+    }
+
+    hot_data_counter[row_number][cache_line_number]++;
+}
+
+void HotDataDetector::print_stats(){
+    
+    std::cout << "\n" << "HOT_DATA_DETECTOR STATISTICS" << "\n" << std::endl;
+    std::cout << "numBanks: " << static_cast<int>(numBanks) << std::endl;
+    std::cout << "numRanks: " << static_cast<int>(numRanks) << std::endl;
+    std::cout << "numChannels: " << static_cast<int>(numChannels) << std::endl;
+    std::cout << "numRows: " << numRows << std::endl;
+    std::cout << "numDRAMRows: " << numDRAMRows << std::endl;
+    std::cout << "cacheLinesSizeBytes: " << cacheLinesSizeBytes << std::endl;
+    std::cout << "dramRowSizeBytes: " << dramRowSizeBytes << std::endl;
+    std::cout << "cacheLinesPerRow: " << cacheLinesPerRow << std::endl;
+    std::cout << "" << "\n" << std::endl;
+    // Calculate total number of data reads
+    uint64_t total_reads = 0;
+    for (int row = 0; row < numDRAMRows; row++) {
+        for (int line = 0; line < cacheLinesPerRow; line++) {
+            total_reads += hot_data_counter[row][line];
+        }
+    }
+
+    // Create vector of pairs to store (row, line) pairs along with access counts
+    std::vector<std::pair<std::pair<int, int>, int>> access_counts;
+    for (int row = 0; row < numDRAMRows; row++) {
+        for (int line = 0; line < cacheLinesPerRow; line++) {
+            access_counts.push_back({{row, line}, hot_data_counter[row][line]});
+        }
+    }
+
+    // Sort vector by value (access count)
+    std::sort(access_counts.begin(), access_counts.end(), [](const auto &left, const auto &right) {
+        return left.second > right.second;
+    });
+
+    // Print top 200 most accessed (row, line) pairs
+    int count = 0;
+    for (const auto &entry : access_counts) {
+        std::cout << "Row: " << entry.first.first << ", Line: " << entry.first.second << ", Accesses: " << entry.second << std::endl;
+        count++;
+        if (count >= 200) {
+            break;
+        }
+    }
+
+    std::cout << "" << std::endl;
+
+    // Calculate total number of accesses per row
+    std::vector<std::pair<int, uint64_t>> row_accesses;
+    for (int row = 0; row < numDRAMRows; row++) {
+        uint64_t total_accesses = 0;
+        for (int line = 0; line < cacheLinesPerRow; line++) {
+            total_accesses += hot_data_counter[row][line];
+        }
+        row_accesses.push_back(std::make_pair(row, total_accesses));
+    }
+
+    // Sort rows by access count (descending order)
+    std::sort(row_accesses.begin(), row_accesses.end(), [](const auto &left, const auto &right) {
+        return left.second > right.second;
+    });
+
+    // Print the top 100 most accessed rows
+    std::cout << "\nTop 200 Most Accessed Rows:" << std::endl;
+    for (int i = 0; i < std::min(200, static_cast<int>(row_accesses.size())); i++) {
+        std::cout << "Row " << row_accesses[i].first << ": " << row_accesses[i].second << " accesses" << std::endl;
+    }
+
+    std::cout << "\n" << std::endl;
+
+    // Print total number of data reads
+    std::cout << "Total Number of Data Reads: " << total_reads << std::endl;
+}
+
 /***************************************************************************
  * FUNCTIONAL CACHE BEGINS
  * *************************************************************************/

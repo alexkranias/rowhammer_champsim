@@ -139,4 +139,44 @@ public:
     void print_stats();
 };
 
+/**
+ * Class for detecting which parts of a row are "hot" based on cache lines accesses.
+ * 
+*/
+class HotDataDetector {
+
+private:
+    // 2D Array (rows x cache lines) to store number accesses to each cache line of each row 
+    uint32_t        **hot_data_counter;
+    
+    // Cache Organization Information
+    uint32_t            cacheNumSets;
+    uint32_t            cacheNumWays;    
+    uint16_t            cacheLinesSizeBytes;
+
+    // DRAM Organization Information
+    uint32_t            numRows;
+    uint8_t             numBanks;
+    uint8_t             numRanks;
+    uint8_t             numChannels;
+    uint32_t            numDRAMRows;
+
+    // Row and Cache Line Sizes
+    uint16_t            dramRowSizeBytes;
+    uint16_t             cacheLinesPerRow;
+
+/**
+ * __rowSize: number of bytes of data in each DRAM row
+ * __cacheLineSize: number of bytes in each Cache Line
+*/
+public:
+    HotDataDetector(uint16_t __dramRowSizeBytes, uint16_t __cacheLinesSizeBytes, uint32_t __numRows,
+                uint8_t __numBanks, uint8_t __numRanks, uint8_t __numChannels);
+                
+    void access(uint64_t address);
+    void access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co);
+    void reset();
+    void print_stats();
+};
+
 #endif // MGRIES_H

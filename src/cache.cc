@@ -99,7 +99,7 @@ void CACHE::handle_writeback()
     } else // MISS
     {
       bool success;
-      if (handle_pkt.type == RFO && handle_pkt.to_return.empty()) {
+      if (handle_pkt.type == RFO && handle_pkt.to_return.empty()) { // RFO = read for ownership
         success = readlike_miss(handle_pkt);
       } else {
         // find victim
@@ -299,6 +299,12 @@ bool CACHE::readlike_miss(PACKET& handle_pkt)
     handle_pkt.pf_metadata = impl_prefetcher_cache_operate(pf_base_addr, handle_pkt.ip, 0, handle_pkt.type, handle_pkt.pf_metadata);
   }
 
+  // HOT DATA TRACKING
+  // tracks number of times a cache line in the DRAM is accessed (not already in buffer)
+  if (all_warmup_complete > NUM_CPUS && NAME == "LLC") {
+    // lower_level->hot_data_detector->access(handle_pkt.address); // it->first = uint64_t address
+  }
+
   return true;
 }
 
@@ -414,6 +420,12 @@ bool CACHE::filllike_miss(std::size_t set, std::size_t way, PACKET& handle_pkt)
   // COLLECT STATS
   sim_miss[handle_pkt.cpu][handle_pkt.type]++;
   sim_access[handle_pkt.cpu][handle_pkt.type]++;
+
+  // HOT DATA TRACKING
+  // tracks number of times a cache line in the DRAM is accessed (not already in buffer)
+  if (all_warmup_complete > NUM_CPUS && NAME == "LLC") {
+    // lower_level->hot_data_detector->access(handle_pkt.address); // it->first = uint64_t address
+  }
 
   return true;
 }
@@ -598,6 +610,7 @@ int CACHE::add_wq(PACKET* packet)
     WQ.push_back(*packet);
   else
     WQ.push_back_ready(*packet);
+  
 
   DP(if (warmup_complete[packet->cpu]) std::cout << " ADDED" << std::endl;)
 
@@ -795,8 +808,12 @@ void CACHE::performRHActions() {
 
   int max_actions = 2;
 
+ // it = <handle_pkt.address, rhACTION>
   for (auto it = lower_level->rhActions.begin(); it != lower_level->rhActions.end();) {
+    // assert(ART_ENABLE || HYDRA_ENABLE || IDEAL_TRACKER || HOT_DATA_ENABLE);
+    
     assert(ART_ENABLE || HYDRA_ENABLE || IDEAL_TRACKER);
+
     PACKET handle_pkt;
 
     handle_pkt.cpu = 0;
@@ -805,13 +822,13 @@ void CACHE::performRHActions() {
     handle_pkt.instr_id = 0;
     handle_pkt.ip = 0;
     handle_pkt.type = it->second;
-    if (it->second == RH_WRITE) {
+    if (it->second == RH_WRITE) {    // If writing
       handle_pkt.fill_level = lower_level->fill_level;
       handle_pkt.to_return.clear();
       if (lower_level->add_wq(&handle_pkt) == -2)
         return;
     }
-    else {
+    else {  // if reading
       handle_pkt.fill_level = fill_level;
       handle_pkt.to_return = {this};
       if (lower_level->get_occupancy(1, it->first) == lower_level->get_size(1, it->second))
@@ -833,7 +850,7 @@ void CACHE::recvACTInfo() {
     return;
   
   for (auto it = lower_level->ACTs.begin(); it != lower_level->ACTs.end();) {
-    uint64_t ch = it->ch, ra = it->ra, ba = it->ba, ro = it->ro;
+    uint64_t ch = it->ch, ra = it->ra, ba = it->ba, ro = it->ro, co = it->co;
     uint64_t CRA_idx = ro * (DRAM_CHANNELS * DRAM_BANKS * DRAM_RANKS)
                         + ra * (DRAM_CHANNELS * DRAM_BANKS)
                         + ba * (DRAM_CHANNELS)
@@ -1011,6 +1028,10 @@ void CACHE::recvACTInfo() {
         uniq_rows_ACT++;
       }
       CRA_ctr[CRA_idx]++;
+
+      // This is a row hit. Keep track of which cache block we hit.
+      lower_level->hot_data_detector->access(ch, ra, ba, ro, co);
+
       if (CRA_ctr[CRA_idx] % (RH_THRESHOLD/2) == 0) {
         s_num_mits++;
         num_mits++;

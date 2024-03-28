@@ -28,7 +28,7 @@ public:
             std::cout << "DRAMSim3_DRAM init -- fixed meta-RQ size" << std::endl;   
             memory_system_->RegisterACTCallback(std::bind(&DRAMSim3_DRAM::ACTCallBack, this, 
                                                 std::placeholders::_1, std::placeholders::_2, 
-                                                std::placeholders::_3, std::placeholders::_4));
+                                                std::placeholders::_3, std::placeholders::_4, std::placeholders::_5));
             if (HYDRA_ENABLE) {
                 std::cout << "[RH_DEFENSE] HydraVicRef ENABLED" << std::endl;
                 detector = new Hydra(HYDRA_ROW_GROUP_SIZE, RH_THRESHOLD/2, DRAM_ROWS, 
@@ -36,6 +36,12 @@ public:
                 ((Hydra *)detector)->RCC = new Functional_Cache(HYDRA_RCC_SETS, 16 /* ways */);
                 std::cout << "[RH_DEFENSE] RTH " << RH_THRESHOLD << " ROW_GROUP_SIZE " 
                             << HYDRA_ROW_GROUP_SIZE << " RCC_SETS " << HYDRA_RCC_SETS << std::endl;
+            }
+            // HOT_DATA_ENABLE
+            if (true) {
+                std::cout << "HotDataDetector ENABLED" << std::endl;
+                uint16_t DRAM_SIZE_PER_ROW = memory_system_->GetDeviceWidth() * memory_system_->GetColumns(); // dram size = rows*columns*banks*groups
+                hot_data_detector = new HotDataDetector(DRAM_SIZE_PER_ROW, BLOCK_SIZE, DRAM_ROWS, DRAM_BANKS, DRAM_RANKS, DRAM_CHANNELS); // INITIALIZE HOT DATA DETECTOR
             }
             numPPages = DRAM_CHANNELS * DRAM_RANKS * DRAM_BANKS 
                                 * DRAM_ROWS * DRAM_COLUMNS * BLOCK_SIZE / PAGE_SIZE;
@@ -225,8 +231,8 @@ public:
         }
     }
     void WriteCallBack(uint64_t addr) { return; }
-    void ACTCallBack(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro) {
-        ACTs.push_back(ACTInfo(ch, ra, ba, ro));
+    void ACTCallBack(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co) { // added a column argument
+        ACTs.push_back(ACTInfo(ch, ra, ba, ro, co));
         //DEBUG std::cout << "[ACT] Ch-" << ch << " Ra-" << ra << " Ba-" << ba << " Ro-" << ro << std::endl;
     }
     void PrintStats() { memory_system_->PrintStats(); }

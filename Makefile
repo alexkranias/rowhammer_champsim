@@ -4,11 +4,11 @@ CFLAGS := -Wall -O3 -std=gnu99
 CXXFLAGS := -Wall -O3 -std=c++17
 CPPFLAGS :=  -Iinc -MMD -MP
 LDFLAGS := 
-LDLIBS := -L/storage/home/hcoda1/4/asaxena317/p-mqureshi4-0/art_tracking_rowhammer/DRAMsim3 -ldramsim3
+LDLIBS := -L/home/akranias3/rowhammer_champsim/dramsim3 -ldramsim3
 
 .phony: all clean
 
-all: bin/1C_16WLLC
+all: bin/8C_16WLLC
 
 clean: 
 	$(RM) inc/champsim_constants.h
@@ -32,7 +32,7 @@ clean:
 	 find btb/basic_btb -name \*.o -delete
 	 find btb/basic_btb -name \*.d -delete
 
-bin/1C_16WLLC: $(patsubst %.cc,%.o,$(wildcard src/*.cc)) obj/repl_rreplacementDsrrip.a obj/pref_pprefetcherDno.a obj/repl_rreplacementDlru.a obj/pref_pprefetcherDno_instr.a obj/bpred_bbranchDhashed_perceptron.a obj/btb_bbtbDbasic_btb.a
+bin/8C_16WLLC: $(patsubst %.cc,%.o,$(wildcard src/*.cc)) obj/repl_rreplacementDsrrip.a obj/pref_pprefetcherDno.a obj/repl_rreplacementDlru.a obj/pref_pprefetcherDno_instr.a obj/bpred_bbranchDhashed_perceptron.a obj/btb_bbtbDbasic_btb.a
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 replacement/srrip/%.o: CFLAGS += -Ireplacement/srrip

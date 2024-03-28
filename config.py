@@ -751,7 +751,7 @@ with open('Makefile', 'wt') as wfp:
     wfp.write('CPPFLAGS := ' + config_file.get('CPPFLAGS', '') + ' -Iinc -MMD -MP\n')
     wfp.write('LDFLAGS := ' + config_file.get('LDFLAGS', '') + '\n')
     # wfp.write('LDLIBS := ' + config_file.get('LDLIBS', '') + '\n')
-    wfp.write('LDLIBS := ' + config_file.get('LDLIBS', '-L/storage/home/hcoda1/4/asaxena317/p-mqureshi4-0/art_tracking_rowhammer/DRAMsim3 -ldramsim3') + '\n')
+    wfp.write('LDLIBS := ' + config_file.get('LDLIBS', '-L/home/akranias3/rowhammer_champsim/dramsim3 -ldramsim3') + '\n')
     wfp.write('\n')
     wfp.write('.phony: all clean\n\n')
     wfp.write('all: ' + config_file['executable_name'] + '\n\n')

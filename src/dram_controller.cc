@@ -125,6 +125,11 @@ void MEMORY_CONTROLLER::operate()
 
         // Hacky CRA stuff
         iter_next_schedule->is_ACT = !row_buffer_hit;
+
+        /**
+         * For a row_buffer_miss, we want to track the amount of data being accessed, then check if 
+        */
+
         if (iter_next_schedule->is_ACT)
         // iter_next_schedule->CRA_idx = op_row + DRAM_ROWS * DRAM_BANKS * DRAM_RANKS * op_channel 
         //                               + DRAM_ROWS * DRAM_BANKS * op_rank + DRAM_ROWS * op_bank;

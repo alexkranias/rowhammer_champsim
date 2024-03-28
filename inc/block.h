@@ -27,14 +27,18 @@
 class MemoryRequestProducer;
 class LSQ_ENTRY;
 
+/**
+ * I am adding a new variable. "co" that represents the column of the data we are accessing
+*/
 struct ACTInfo
 {
   uint64_t ch = 0;
   uint64_t ra = 0;
   uint64_t ba = 0;
   uint64_t ro = 0;
-  ACTInfo(uint64_t _ch, uint64_t _ra, uint64_t _ba, uint64_t _ro)
-          : ch(_ch), ra(_ra), ba(_ba), ro(_ro) {}
+  uint64_t co = 0;
+  ACTInfo(uint64_t _ch, uint64_t _ra, uint64_t _ba, uint64_t _ro, uint64_t _co)
+          : ch(_ch), ra(_ra), ba(_ba), ro(_ro), co(_co) {}
 };
 
 // message packet

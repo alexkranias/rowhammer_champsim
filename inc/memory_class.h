@@ -62,6 +62,8 @@ public:
   std::vector<ACTInfo> ACTs;
   std::vector<std::pair<uint64_t, uint8_t>> rhActions;
   RH_Detector *detector;
+  HotDataDetector *hot_data_detector;
+
   uint64_t numPPages;
   bool *procPageAccess;;
   virtual int add_rq(PACKET* packet) = 0;

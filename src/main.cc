@@ -206,8 +206,15 @@ void print_roi_stats(uint32_t cpu, CACHE* cache)
     cout << "RH_BH_NUM_DELAY " << cache->s_BH_num_delay << std::endl;
     cout << "RH_BH_SUM_DEAY " << cache->s_BH_sum_delay << std::endl;
     cout << "RH_BH_MAX_DELAY " << cache->s_BH_max_delay << std::endl;
-    if (HYDRA_ENABLE)
+    if (HYDRA_ENABLE) {
       cache->lower_level->detector->print_stats();
+    }
+    // if (HOT_DATA_ENABLE) {
+    //   cache->lower_level->hot_data_detector->print_stats();
+    // }
+    if (true) {
+      cache->lower_level->hot_data_detector->print_stats();
+    }
   }
 }
 
