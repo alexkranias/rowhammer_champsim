@@ -225,7 +225,7 @@ HotDataDetector::HotDataDetector(uint16_t __cacheBlocksSizeBytes, uint32_t __num
 
     cacheBlocksSizeBytes = __cacheBlocksSizeBytes;
 
-    cacheBlocksPerRow = numColumns / cacheBlocksSizeBytes; // assumes byte-addressable
+    cacheBlocksPerRow = numColumns; // each column is a cache line
 
     numDRAMRows = __numRows*__numBanks*__numRanks*__numChannels;
     numDRAMBlocks = numDRAMRows * cacheBlocksPerRow;
@@ -255,11 +255,7 @@ void HotDataDetector::reset() {
  */
 void HotDataDetector::access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co) {
 
-    u_int32_t block =   ch * (numRanks*numBanks*numRows*cacheBlocksPerRow) +
-                        ra * (numBanks*numRows*cacheBlocksPerRow) +
-                        ba * (numRows*cacheBlocksPerRow) +
-                        ro * (cacheBlocksPerRow) +
-                        (co / cacheBlocksSizeBytes); // cache block index
+    u_int32_t block = getBlockIndexFromAddress(ch, ra, ba, ro, co);
     
     if (hot_data_counter == nullptr) {
         throw std::runtime_error("hot_data_counter not initialized");
@@ -314,7 +310,7 @@ void HotDataDetector::print_stats(){
         std::tie(ch, ra, ba, ro, block) = getAddressFromBlockIndex(entry.first); // extracts ch, ra, ba, ro, block from INDEX
 
         std::cout
-          << ", Accesses: " << entry.second 
+          << "Accesses: " << entry.second 
           << ", Channel: " << ch 
           << ", Rank: " << ra  
           << ", Bank: " << ba  
@@ -357,7 +353,7 @@ uint64_t HotDataDetector::getBlockIndexFromAddress(uint64_t ch, uint64_t ra, uin
                 ra * (numBanks*numRows*cacheBlocksPerRow) +
                 ba * (numRows*cacheBlocksPerRow) +
                 ro * (cacheBlocksPerRow) +
-                (co / cacheBlocksSizeBytes); // cache block index
+                co; // cache block index
 }
 
 /***************************************************************************

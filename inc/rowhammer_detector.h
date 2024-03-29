@@ -148,6 +148,8 @@ class HotDataDetector {
 private:
     // 1D Array (channel x rank x bank x row x cache block) maps to a block using an index
     uint32_t        *hot_data_counter;
+
+    uint32_t        *num_hot_data_per_row;
     
     // Cache Organization Information
     uint32_t            cacheNumSets;
