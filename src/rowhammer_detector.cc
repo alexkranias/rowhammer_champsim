@@ -222,42 +222,25 @@ HotDataDetector::HotDataDetector(uint16_t __cacheBlocksSizeBytes, uint32_t __num
     numChannels = __numChannels;
     numRows = __numRows;
     numColumns = __numColumns;
-    numDRAMRows = __numRows*__numBanks*__numRanks*__numChannels;
 
     cacheBlocksSizeBytes = __cacheBlocksSizeBytes;
 
     cacheBlocksPerRow = numColumns / cacheBlocksSizeBytes; // assumes byte-addressable
 
+    numDRAMRows = __numRows*__numBanks*__numRanks*__numChannels;
+    numDRAMBlocks = numDRAMRows * cacheBlocksPerRow;
+
     // Initializes array
-    hot_data_counter = (u_int32_t*****) calloc(sizeof(u_int32_t***), __numChannels);
-    for (int ch = 0; ch < __numChannels; ch++) {
-        hot_data_counter[ch] = (u_int32_t****) calloc(sizeof(u_int32_t**), __numRanks);
-        for (int ra = 0; ra < __numRanks; ra++) {
-            hot_data_counter[ch][ra] = (u_int32_t***) calloc(sizeof(u_int32_t*), __numBanks);
-            for (int ba = 0; ba < __numBanks; ba++) {
-                hot_data_counter[ch][ra][ba] = (u_int32_t**) calloc(sizeof(u_int32_t), __numRows);
-                for (int ro = 0; ro < __numRows; ro++) {
-                    hot_data_counter[ch][ra][ba][ro] = (u_int32_t*) calloc(sizeof(u_int32_t), cacheBlocksPerRow);
-                }
-            }
-        }
-    }
+    hot_data_counter = (u_int32_t*) calloc(sizeof(u_int32_t), numDRAMBlocks);
+
 }
 
 /**
  * Sets all row-cache-block counters to 0.
 */
 void HotDataDetector::reset() {
-    for (int ch = 0; ch < numChannels; ch++) {
-        for (int ra = 0; ra < numRanks; ra++) {
-            for (int ba = 0; ba < numBanks; ba++) {
-                for (int ro = 0; ro < numRows; ro++) {
-                    for (int block = 0; block < cacheBlocksPerRow; ro++) {
-                        hot_data_counter[ch][ra][ba][ro][block] = 0;
-                    }
-                }
-            }
-        }
+    for (int block = 0; block < numDRAMBlocks; block++) {
+        hot_data_counter[block] = 0;
     }
 }
 
@@ -272,17 +255,17 @@ void HotDataDetector::reset() {
  */
 void HotDataDetector::access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co) {
 
-    u_int32_t block = co / cacheBlocksSizeBytes; // cache block index
+    u_int32_t block =   ch * (numRanks*numBanks*numRows*cacheBlocksPerRow) +
+                        ra * (numBanks*numRows*cacheBlocksPerRow) +
+                        ba * (numRows*cacheBlocksPerRow) +
+                        ro * (cacheBlocksPerRow) +
+                        (co / cacheBlocksSizeBytes); // cache block index
     
     if (hot_data_counter == nullptr) {
         throw std::runtime_error("hot_data_counter not initialized");
     }
 
-    if (hot_data_counter[ch][ra][ba][ro] == nullptr) {
-        throw std::runtime_error("ROW " + std::to_string(ro) + " not initialized in hot_data_counter");
-    }
-
-    hot_data_counter[ch][ra][ba][ro][block]++;
+    hot_data_counter[block]++;
 }
 
 void HotDataDetector::print_stats(){
@@ -297,42 +280,47 @@ void HotDataDetector::print_stats(){
     std::cout << "cacheBlocksSizeBytes: " << cacheBlocksSizeBytes << std::endl;
     std::cout << "cacheBlocksPerRow: " << cacheBlocksPerRow << std::endl;
     std::cout << "" << "\n" << std::endl;
+    
     // Calculate total number of data reads
     uint64_t total_reads = 0;
-    for (int ch = 0; ch < numChannels; ch++) {
-        for (int ra = 0; ra < numRanks; ra++) {
-            for (int ba = 0; ba < numBanks; ba++) {
-                for (int ro = 0; ro < numRows; ro++) {
-                    for (int block = 0; block < cacheBlocksPerRow; ro++) {
-                        total_reads += hot_data_counter[ch][ra][ba][ro][block];
-                    }
-                }
-            }
-        }
+    for (int block = 0; block < numDRAMBlocks; block++) {
+        total_reads += hot_data_counter[block];
     }
+
+    struct CompareAccessCounts {
+        bool operator()(const std::pair<uint64_t, uint64_t>& a, const std::pair<uint64_t, uint64_t>& b) const {
+            // Compare based on the second element of the pair (access counts)
+            return a.second < b.second;
+        }
+    };
 
     // Create priority queue to store row accesses
-    std::priority_queue<std::pair<uint64_t, std::tuple<int, int, int, int, int>>> access_counts;
+    std::priority_queue<std::pair<uint64_t, uint64_t>, std::vector<std::pair<uint64_t, uint64_t>>, CompareAccessCounts> access_counts;
 
     // Add entries to the priority queue
-    for (int ch = 0; ch < numChannels; ch++) {
-        for (int ra = 0; ra < numRanks; ra++) {
-            for (int ba = 0; ba < numBanks; ba++) {
-                for (int ro = 0; ro < numRows; ro++) {
-                    for (int block = 0; block < cacheBlocksPerRow; block++) {
-                        access_counts.push(std::make_pair(hot_data_counter[ch][ra][ba][ro][block], std::make_tuple(ch, ra, ba, ro, block))); //
-                    }
-                }
-            }
-        }
+    for (uint64_t block = 0; block < numDRAMBlocks; block++) {
+        access_counts.push(std::make_pair(block, hot_data_counter[block]));
     }
+
+    u_int64_t co, ro, ba, ra, ch, block, index;
 
     // Print top 200 most accessed (channel, rank, bank, row, line) tuples
     int count = 0;
     while (!access_counts.empty() && count < 200) {
         auto entry = access_counts.top();
         access_counts.pop();
-        std::cout << "Channel: " << std::get<0>(entry.second) << ", Rank: " << std::get<1>(entry.second) << ", Bank: " << std::get<2>(entry.second) << ", Row: " << std::get<3>(entry.second) << ", Block: " << std::get<4>(entry.second) << ", Accesses: " << entry.first << std::endl;
+
+        index = entry.first;
+        std::tie(ch, ra, ba, ro, block) = getAddressFromBlockIndex(entry.first); // extracts ch, ra, ba, ro, block from INDEX
+
+        std::cout
+          << ", Accesses: " << entry.second 
+          << ", Channel: " << ch 
+          << ", Rank: " << ra  
+          << ", Bank: " << ba  
+          << ", Row: " << ro 
+          << ", Block: " << block << std::endl;
+
         count++;
     }
 
@@ -341,6 +329,35 @@ void HotDataDetector::print_stats(){
     // Print total number of data reads
     std::cout << "Total Number of Data Reads: " << total_reads << std::endl;
 
+
+}
+
+std::tuple<int, int, int, int, int> HotDataDetector::getAddressFromBlockIndex(u_int64_t index) {
+        u_int64_t ro, ba, ra, ch, block;
+        block = index % cacheBlocksPerRow;     // index = block index
+        index /= cacheBlocksPerRow;
+        
+        ro = index % numRows;               // index = row index
+        index /= numRows;
+
+        ba = index % numBanks;              // index = bank index
+        index /= numBanks;
+
+        ra = index % numRanks;              // index = rank index
+        index /= numRanks;
+
+        ch = index;                         // index = channel index
+        
+        return std::make_tuple(ch, ra, ba, ro, block);
+
+}
+
+uint64_t HotDataDetector::getBlockIndexFromAddress(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co) {
+        return ch * (numRanks*numBanks*numRows*cacheBlocksPerRow) +
+                ra * (numBanks*numRows*cacheBlocksPerRow) +
+                ba * (numRows*cacheBlocksPerRow) +
+                ro * (cacheBlocksPerRow) +
+                (co / cacheBlocksSizeBytes); // cache block index
 }
 
 /***************************************************************************

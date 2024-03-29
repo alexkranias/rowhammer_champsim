@@ -146,8 +146,8 @@ public:
 class HotDataDetector {
 
 private:
-    // 5D Array (channel x rank x bank x row x cache block)
-    uint32_t        *****hot_data_counter;
+    // 1D Array (channel x rank x bank x row x cache block) maps to a block using an index
+    uint32_t        *hot_data_counter;
     
     // Cache Organization Information
     uint32_t            cacheNumSets;
@@ -161,6 +161,7 @@ private:
     uint8_t             numRanks;
     uint8_t             numChannels;
     uint32_t            numDRAMRows;
+    uint32_t            numDRAMBlocks;
 
     // Row and Cache Line Sizes
     uint16_t             cacheBlocksPerRow;
@@ -177,6 +178,9 @@ public:
     void access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co);
     void reset();
     void print_stats();
+private:
+    std::tuple<int, int, int, int, int> getAddressFromBlockIndex(u_int64_t index);
+    uint64_t getBlockIndexFromAddress(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co);
 };
 
 #endif // MGRIES_H
