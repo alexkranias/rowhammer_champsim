@@ -149,7 +149,9 @@ private:
     // 1D Array (channel x rank x bank x row x cache block) maps to a block using an index
     uint32_t        *hot_data_counter;
 
-    uint32_t        *num_hot_data_per_row;
+    uint32_t        *num_hot_blocks_per_row; // can calculate average "row hotness %". What percent of this hot row is actually being accessed? Divide by cache.s_resets
+    uint32_t        *max_hot_blocks_per_row; // keeps track of max num hot blocks in a given interval to calc "row hotness %" per row using cache.s_resets.
+
     
     // Cache Organization Information
     uint32_t            cacheNumSets;
@@ -179,7 +181,7 @@ public:
     void access(uint64_t address);
     void access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co);
     void reset();
-    void print_stats();
+    void print_stats(uint64_t num_resets);
 private:
     std::tuple<int, int, int, int, int> getAddressFromBlockIndex(u_int64_t index);
     uint64_t getBlockIndexFromAddress(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro, uint64_t co);

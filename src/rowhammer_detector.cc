@@ -1,5 +1,6 @@
 #include "rowhammer_detector.h"
 #include <queue>
+#include <iomanip>
 
 Misra_Gries::Misra_Gries(uint32_t __numEntries, uint32_t __threshold, uint32_t __numRows,
                         uint8_t __numBanks, uint8_t __numRanks, uint8_t __numChannels){
@@ -232,13 +233,18 @@ HotDataDetector::HotDataDetector(uint16_t __cacheBlocksSizeBytes, uint32_t __num
 
     // Initializes array
     hot_data_counter = (u_int32_t*) calloc(sizeof(u_int32_t), numDRAMBlocks);
+    num_hot_blocks_per_row = (u_int32_t*) calloc(sizeof(u_int32_t), numDRAMRows);
+    max_hot_blocks_per_row = (u_int32_t*) calloc(sizeof(u_int32_t), numDRAMRows);
 
 }
 
 /**
  * Sets all row-cache-block counters to 0.
+ * Increments counter for whether a block was accessed in a row.
 */
 void HotDataDetector::reset() {
+    std::cout << "HOT DATA RESET" << std::endl;
+    u_int32_t hot_block_count = 0;
     for (int block = 0; block < numDRAMBlocks; block++) {
         hot_data_counter[block] = 0;
     }
@@ -264,7 +270,7 @@ void HotDataDetector::access(uint64_t ch, uint64_t ra, uint64_t ba, uint64_t ro,
     hot_data_counter[block]++;
 }
 
-void HotDataDetector::print_stats(){
+void HotDataDetector::print_stats(uint64_t num_resets){
     
     std::cout << "\n" << "HOT_DATA_DETECTOR STATISTICS" << "\n" << std::endl;
     std::cout << "numBanks: " << static_cast<int>(numBanks) << std::endl;
@@ -302,9 +308,14 @@ void HotDataDetector::print_stats(){
 
     // Print top 200 most accessed (channel, rank, bank, row, line) tuples
     int count = 0;
-    while (!access_counts.empty() && count < 200) {
+    while (!access_counts.empty() && count < numDRAMBlocks) {
         auto entry = access_counts.top();
         access_counts.pop();
+
+        // Displays all blocks accessed and 
+        if (entry.second == 0) {
+            break;
+        }
 
         index = entry.first;
         std::tie(ch, ra, ba, ro, block) = getAddressFromBlockIndex(entry.first); // extracts ch, ra, ba, ro, block from INDEX
@@ -319,8 +330,48 @@ void HotDataDetector::print_stats(){
 
         count++;
     }
+    std::cout << "NUM_BLOCKS_ACCESSED: " << count << std::endl;
 
     std::cout << "\n" << std::endl;
+
+    u_int32_t hot_block_count = 0;
+    u_int64_t row, prev_row = -1; // initialize prev_row to prevent bug when there has not been a prev row yet
+    for (int block = 0; block < numDRAMBlocks; block++) {
+        if (hot_data_counter[block] > 0) {
+            row = std::get<3>(getAddressFromBlockIndex(block)); // get row
+            if (row != prev_row) { // to figure out when we are on a new row. Resets block count.
+                hot_block_count = 0;
+            }
+            prev_row = row;
+            hot_block_count++;
+            num_hot_blocks_per_row[row]++;
+        }
+    }
+
+    // Create priority queue to store row accesses
+    std::priority_queue<std::pair<uint64_t, uint64_t>, std::vector<std::pair<uint64_t, uint64_t>>, CompareAccessCounts> block_counts;
+
+    // Add entries to the priority queue
+    for (uint64_t row = 0; row < numDRAMRows; row++) {
+        block_counts.push(std::make_pair(row, num_hot_blocks_per_row[row]));
+    }
+
+    // Print sorted num_hot_blocks_per_row
+    count = 0;
+    
+    std::cout << std::endl;
+    std::cout << "Sorted num_hot_blocks_per_row:" << std::endl;
+    while (!block_counts.empty() && count < numDRAMRows) {
+        auto entry = block_counts.top();
+        block_counts.pop();
+        if (entry.second == 0) {
+            break;
+        }
+        std::cout << "Row: " << entry.first << ", Hot Block Population: " << std::fixed << std::setprecision(2) << 100*entry.second / (double)cacheBlocksPerRow << "%" << std::endl;
+        count++;
+    }
+
+    std::cout << "NUM_ROWS_ACCESSED: " << count << std::endl;
 
     // Print total number of data reads
     std::cout << "Total Number of Data Reads: " << total_reads << std::endl;

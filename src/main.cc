@@ -213,7 +213,7 @@ void print_roi_stats(uint32_t cpu, CACHE* cache)
     //   cache->lower_level->hot_data_detector->print_stats();
     // }
     if (true) {
-      cache->lower_level->hot_data_detector->print_stats();
+      cache->lower_level->hot_data_detector->print_stats(cache->s_resets);
     }
   }
 }

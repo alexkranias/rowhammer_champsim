@@ -473,9 +473,13 @@ void CACHE::operate_reads()
       uniq_rows_ACT = 0;
       num_ACT = 0;
       num_mits = 0;
-      if (HYDRA_ENABLE)
+      if (HYDRA_ENABLE) {
         lower_level->detector->reset();
-    }
+      }
+      
+      lower_level->hot_data_detector->reset();
+      lower_level->hot_data_detector->print_stats(1);
+  }
     if (BLOCKHAMMER && all_warmup_complete > NUM_CPUS && current_cycle % 10000000 == 0) {
       std::cout << "[Cycle-" << current_cycle << "] LLC_BH_STATS:- NUM_DELAY: " 
                 << s_BH_num_delay 
