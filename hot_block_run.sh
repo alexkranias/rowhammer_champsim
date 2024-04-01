@@ -22,5 +22,5 @@ do
     output_log="log_results/new_out_${trace_file}.log"
 
     # Run the command with different trace files and log outputs
-    nohup bin/8C_16WLLC --warmup_instructions 100000 --simulation_instructions 100000 -traces "/trace2/ChampSim/dpc3/$trace_file" a > "$output_log" &
+    nohup bin/8C_16WLLC --warmup_instructions 50000000 --simulation_instructions 200000000 -traces "/trace2/ChampSim/dpc3/$trace_file" a > "$output_log" &
 done

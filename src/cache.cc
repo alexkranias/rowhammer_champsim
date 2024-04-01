@@ -477,8 +477,8 @@ void CACHE::operate_reads()
         lower_level->detector->reset();
       }
       
-      lower_level->hot_data_detector->reset();
       lower_level->hot_data_detector->print_stats(1);
+      lower_level->hot_data_detector->reset();
   }
     if (BLOCKHAMMER && all_warmup_complete > NUM_CPUS && current_cycle % 10000000 == 0) {
       std::cout << "[Cycle-" << current_cycle << "] LLC_BH_STATS:- NUM_DELAY: " 
