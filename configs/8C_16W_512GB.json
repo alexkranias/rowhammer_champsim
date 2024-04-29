@@ -231,7 +231,7 @@
     },
 
     "physical_memory": {
-        "dramsim3_config": "/storage/home/hcoda1/4/asaxena317/p-mqureshi4-0/art_tracking_rowhammer/UnModifiedChampSim/dramsim3_configs/DDR5_512GB_4ch_4800.ini",
+        "dramsim3_config": "/home/akranias3/rowhammer_champsim/champsim/dramsim3_configs/DDR5_512GB_4ch_4800.ini",
         "frequency": 2400,
         "channels": 4,
         "ranks": 1,

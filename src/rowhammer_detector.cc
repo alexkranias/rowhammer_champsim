@@ -252,6 +252,10 @@ void HotDataDetector::reset() {
     for (int block = 0; block < numDRAMBlocks; block++) {
         hot_data_counter[block] = 0;
     }
+    print_stats(0);
+    for (int row = 0; row < numDRAMRows; row++) {
+        num_hot_blocks_per_row[row] = 0;
+    }
 }
 
 /**
@@ -325,15 +329,10 @@ void HotDataDetector::print_stats(uint64_t num_resets){
     std::cout << "\n" << std::endl;
 
     u_int32_t hot_block_count = 0;
-    u_int64_t row, prev_row = -1; // initialize prev_row to prevent bug when there has not been a prev row yet
+    u_int64_t row, row_index; // initialize prev_row to prevent bug when there has not been a prev row yet
     for (int block = 0; block < numDRAMBlocks; block++) {
         if (hot_data_counter[block] > 0) {
-            row = std::get<3>(getAddressFromBlockIndex(block)); // get row
-            if (row != prev_row) { // to figure out when we are on a new row. Resets block count.
-                hot_block_count = 0;
-            }
-            prev_row = row;
-            hot_block_count++;
+            row = block / cacheBlocksPerRow;
             num_hot_blocks_per_row[row]++;
         }
     }
